@@ -1,0 +1,141 @@
+name: Roborazzi PR comment
+
+on:
+  workflow_run:
+    workflows:
+      - Roborazzi
+    types:
+      - completed
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch }}-${{ github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+jobs:
+  comment:
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'failure'
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Download PR number
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          name: pr
+          run_id: ${{ github.event.workflow_run.id }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get pull request number
+        id: pr
+        shell: bash
+        run: echo "number=$(cat NR)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Prepare companion branch
+        env:
+          BRANCH_NAME: companion_${{ github.event.workflow_run.head_branch }}
+        run: |
+          git branch -D "$BRANCH_NAME" || true
+          git checkout --orphan "$BRANCH_NAME"
+          git rm -rf .
+
+      - name: Download Roborazzi diffs
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          name: roborazzi-diffs
+          run_id: ${{ github.event.workflow_run.id }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          path: screenshot-diff
+
+      - name: Check for compare images
+        id: compare-images
+        shell: bash
+        run: |
+          mapfile -t files < <(find screenshot-diff -type f -name "*_compare.*")
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "has_compare_images=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "has_compare_images=true" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "${files[@]}" > compare_files.txt
+
+      - name: Push compare images to companion branch
+        if: steps.compare-images.outputs.has_compare_images == 'true'
+        env:
+          BRANCH_NAME: companion_${{ github.event.workflow_run.head_branch }}
+        run: |
+          while IFS= read -r file; do
+            target="${file#screenshot-diff/}"
+            mkdir -p "$(dirname "$target")"
+            cp "$file" "$target"
+            git add "$target"
+          done < compare_files.txt
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Add Roborazzi screenshot diffs"
+          git push origin HEAD:"$BRANCH_NAME" -f
+
+      - name: Build PR comment
+        id: comment
+        if: steps.compare-images.outputs.has_compare_images == 'true'
+        env:
+          BRANCH_NAME: companion_${{ github.event.workflow_run.head_branch }}
+        shell: bash
+        run: |
+          delimiter="$(openssl rand -hex 8)"
+          {
+            echo "body<<${delimiter}"
+            echo "## Roborazzi screenshot diff report"
+            echo ""
+            echo "CI run: ${{ github.event.workflow_run.html_url }}"
+            echo ""
+            echo "| Screenshot | Diff |"
+            echo "|---|---|"
+          } >> "$GITHUB_OUTPUT"
+
+          while IFS= read -r file; do
+            target="${file#screenshot-diff/}"
+            file_name="$(basename "$target")"
+            url_path="${BRANCH_NAME}/${target}"
+            url_path="${url_path//#/%23}"
+            image_url="https://github.com/${{ github.repository }}/blob/${url_path}?raw=true"
+            echo "| \`${file_name}\` | ![](${image_url}) |" >> "$GITHUB_OUTPUT"
+          done < compare_files.txt
+
+          {
+            echo ""
+            echo "Download the full HTML report from the [\`roborazzi-diffs\` artifact](${{ github.event.workflow_run.html_url }}) → \`reports/roborazzi/debug/index.html\`."
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Find existing comment
+        if: steps.compare-images.outputs.has_compare_images == 'true'
+        uses: peter-evans/find-comment@v3
+        id: find-comment
+        with:
+          issue-number: ${{ steps.pr.outputs.number }}
+          comment-author: github-actions[bot]
+          body-includes: Roborazzi screenshot diff report
+
+      - name: Post PR comment
+        if: steps.compare-images.outputs.has_compare_images == 'true'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ steps.pr.outputs.number }}
+          body: ${{ steps.comment.outputs.body }}
+          edit-mode: replace
