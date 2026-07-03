@@ -10,7 +10,8 @@ class VoiceToolExecutor(
     private val scrollController: ItemListScrollController,
 ) {
     fun execute(name: String, arguments: JSONObject): String {
-        return when (name) {
+        VoiceLog.i("Tool", "Executing $name with $arguments")
+        val output = when (name) {
             "navigate_to_screen" -> {
                 val destination = arguments.getString("destination")
                 val itemId = if (arguments.has("item_id") && !arguments.isNull("item_id")) {
@@ -28,5 +29,7 @@ class VoiceToolExecutor(
             "describe_screen" -> ScreenContentProvider.dumpScreenJson()
             else -> "Unknown tool: $name"
         }
+        VoiceLog.i("Tool", "$name → ${output.take(200)}")
+        return output
     }
 }

@@ -1,7 +1,9 @@
 package com.example.roborazzidemo.voice
 
-import android.util.Log
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -34,6 +36,9 @@ class GrokVoiceSession(
     private var webSocket: WebSocket? = null
     private var sessionConfigured = false
     private var sessionUpdateSent = false
+    private var responseWatchdogJob: Job? = null
+    private var activeResponseId: String? = null
+    private var audioChunksSent = 0
 
     val audioLevel = audioCapture.audioLevel
 
@@ -42,9 +47,16 @@ class GrokVoiceSession(
         .build()
 
     fun connect() {
-        if (webSocket != null) return
+        if (webSocket != null) {
+            VoiceLog.w("Session", "connect() ignored — already connected")
+            return
+        }
         sessionConfigured = false
         sessionUpdateSent = false
+        activeResponseId = null
+        audioChunksSent = 0
+
+        VoiceLog.i("Session", "Connecting to ${VoiceConstants.REALTIME_URL}")
 
         val request = Request.Builder()
             .url(VoiceConstants.REALTIME_URL)
@@ -53,7 +65,7 @@ class GrokVoiceSession(
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.i(TAG, "WebSocket open")
+                VoiceLog.i("Session", "WebSocket open (HTTP ${response.code})")
                 listener.onStatusChanged("Configuring session…")
                 sendSessionUpdate(webSocket)
             }
@@ -63,13 +75,13 @@ class GrokVoiceSession(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket failure", t)
+                VoiceLog.e("Session", "WebSocket failure (HTTP ${response?.code})", t)
                 listener.onError(t.message ?: "Connection failed")
                 cleanupConnection(notifyListener = true)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.i(TAG, "WebSocket closed: $code $reason")
+                VoiceLog.i("Session", "WebSocket closed: code=$code reason=$reason")
                 cleanupConnection(notifyListener = this@GrokVoiceSession.webSocket != null)
             }
         })
@@ -77,23 +89,33 @@ class GrokVoiceSession(
 
     fun disconnect() {
         if (webSocket == null) return
+        VoiceLog.i("Session", "Disconnect requested")
         webSocket?.close(1000, "Client disconnect")
         cleanupConnection(notifyListener = true)
     }
 
     private fun cleanupConnection(notifyListener: Boolean) {
+        responseWatchdogJob?.cancel()
+        responseWatchdogJob = null
         audioCapture.stop()
         audioPlayback.stop()
         webSocket = null
         sessionConfigured = false
         sessionUpdateSent = false
+        activeResponseId = null
+        VoiceLog.d("Session", "Connection cleaned up (audio_chunks_sent=$audioChunksSent)")
         if (notifyListener) {
             listener.onDisconnected()
         }
     }
 
     fun sendToolResult(output: String, callId: String) {
-        val socket = webSocket ?: return
+        val socket = webSocket ?: run {
+            VoiceLog.w("Session", "sendToolResult dropped — socket null (call_id=$callId)")
+            return
+        }
+        VoiceLog.clientEvent("conversation.item.create (function_call_output, call_id=$callId)")
+        VoiceLog.d("Session", "Tool output: ${output.take(200)}")
         socket.send(
             JSONObject().apply {
                 put("type", "conversation.item.create")
@@ -107,32 +129,34 @@ class GrokVoiceSession(
                 )
             }.toString(),
         )
+        VoiceLog.clientEvent("response.create (after tool result)")
         socket.send(JSONObject().put("type", "response.create").toString())
+        scheduleResponseWatchdog(socket)
     }
 
     private fun sendSessionUpdate(socket: WebSocket) {
         if (sessionUpdateSent) return
         sessionUpdateSent = true
-        val payload = VoiceToolDefinitions.sessionUpdateJson().toString()
-        Log.d(TAG, "Sending session.update")
-        socket.send(payload)
+        VoiceLog.clientEvent("session.update")
+        socket.send(VoiceToolDefinitions.sessionUpdateJson().toString())
     }
 
     private fun handleServerEvent(socket: WebSocket, raw: String) {
         val json = try {
             JSONObject(raw)
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse server event", e)
+            VoiceLog.e("Session", "Failed to parse server event", e)
             return
         }
 
         val type = json.optString("type", "unknown")
-        Log.d(TAG, "Server event: $type")
+        VoiceLog.serverEvent(type, json)
 
         when (type) {
             "ping" -> {
                 val timestamp = json.optLong("timestamp", -1L)
                 if (timestamp >= 0L) {
+                    VoiceLog.clientEvent("pong (timestamp=$timestamp)")
                     socket.send(
                         JSONObject().apply {
                             put("type", "pong")
@@ -145,18 +169,24 @@ class GrokVoiceSession(
             "session.updated" -> {
                 if (!sessionConfigured) {
                     sessionConfigured = true
+                    VoiceLog.i("Session", "Session configured — starting audio capture")
                     listener.onSessionReady()
-                    listener.onStatusChanged("Listening")
-                    startAudioCapture()
+                    listener.onStatusChanged("Ready…")
+                    startAudioCaptureAfterWarmup()
                 }
             }
             "input_audio_buffer.speech_started" -> {
+                clearResponseWatchdog()
                 listener.onUserSpeechStarted()
                 listener.onStatusChanged("You are speaking")
             }
             "input_audio_buffer.speech_stopped" -> {
                 listener.onUserSpeechStopped()
                 listener.onStatusChanged("Processing…")
+            }
+            "input_audio_buffer.committed" -> {
+                VoiceLog.i("Session", "Audio committed — waiting for response")
+                scheduleResponseWatchdog(socket)
             }
             "conversation.item.input_audio_transcription.updated" -> {
                 val transcript = json.optString("transcript", "")
@@ -170,9 +200,15 @@ class GrokVoiceSession(
                     listener.onUserTranscriptCompleted(transcript)
                 }
             }
+            "response.created" -> {
+                clearResponseWatchdog()
+                activeResponseId = json.optJSONObject("response")?.optString("id")
+                VoiceLog.i("Session", "Response started (id=$activeResponseId)")
+                listener.onStatusChanged("Grok is responding…")
+            }
             "response.output_audio.delta" -> {
-                val delta = json.optString("delta", "")
-                audioPlayback.playBase64Chunk(delta)
+                clearResponseWatchdog()
+                audioPlayback.playBase64Chunk(json.optString("delta", ""))
             }
             "response.output_audio_transcript.delta" -> {
                 val delta = json.optString("delta", "")
@@ -184,30 +220,39 @@ class GrokVoiceSession(
                 listener.onAssistantTranscriptDone()
             }
             "response.function_call_arguments.done" -> {
+                clearResponseWatchdog()
                 val name = json.getString("name")
                 val arguments = JSONObject(json.getString("arguments"))
                 val callId = json.getString("call_id")
                 listener.onFunctionCall(name, arguments, callId)
             }
             "response.done" -> {
+                clearResponseWatchdog()
+                activeResponseId = null
+                VoiceLog.i("Session", "Response complete")
                 if (sessionConfigured) {
                     listener.onStatusChanged("Listening")
                 }
             }
             "error" -> {
+                clearResponseWatchdog()
                 val message = json.optJSONObject("error")?.optString("message")
                     ?: json.optString("error")
                     ?: json.optString("message", "Unknown voice API error")
-                Log.e(TAG, "Voice API error: $message")
+                VoiceLog.e("Session", "API error: $message")
                 listener.onError(message)
             }
-            else -> Unit
+            else -> VoiceLog.d("Session", "Unhandled event type: $type")
         }
     }
 
-    private fun startAudioCapture() {
+    private fun startAudioCaptureAfterWarmup() {
         try {
             audioCapture.start(scope) { base64Chunk ->
+                audioChunksSent++
+                if (audioChunksSent == 1 || audioChunksSent % AUDIO_CHUNK_LOG_INTERVAL == 0) {
+                    VoiceLog.d("Session", "Streaming mic audio (chunks_sent=$audioChunksSent)")
+                }
                 webSocket?.send(
                     JSONObject().apply {
                         put("type", "input_audio_buffer.append")
@@ -215,13 +260,53 @@ class GrokVoiceSession(
                     }.toString(),
                 )
             }
+            listener.onStatusChanged("Listening")
+            VoiceLog.i(
+                "Session",
+                "Mic streaming active (warmup=${PcmAudioCapture.CAPTURE_WARMUP_MS}ms, " +
+                    "chunk=${PcmAudioCapture.FRAME_SIZE_BYTES}B)",
+            )
         } catch (e: Exception) {
-            Log.e(TAG, "Audio capture failed", e)
+            VoiceLog.e("Session", "Audio capture failed", e)
             listener.onError(e.message ?: "Microphone capture failed")
         }
     }
 
+    private fun scheduleResponseWatchdog(socket: WebSocket) {
+        responseWatchdogJob?.cancel()
+        VoiceLog.d("Session", "Response watchdog started (${RESPONSE_TIMEOUT_MS}ms)")
+        responseWatchdogJob = scope.launch {
+            delay(RESPONSE_TIMEOUT_MS)
+            VoiceLog.w(
+                "Session",
+                "Response timeout — cancelling (response_id=$activeResponseId, chunks_sent=$audioChunksSent)",
+            )
+            activeResponseId?.let { responseId ->
+                VoiceLog.clientEvent("response.cancel (response_id=$responseId)")
+                socket.send(
+                    JSONObject().apply {
+                        put("type", "response.cancel")
+                        put("response_id", responseId)
+                    }.toString(),
+                )
+            }
+            VoiceLog.clientEvent("input_audio_buffer.clear")
+            socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
+            activeResponseId = null
+            listener.onStatusChanged("Listening")
+        }
+    }
+
+    private fun clearResponseWatchdog() {
+        if (responseWatchdogJob != null) {
+            VoiceLog.d("Session", "Response watchdog cleared")
+        }
+        responseWatchdogJob?.cancel()
+        responseWatchdogJob = null
+    }
+
     companion object {
-        private const val TAG = "GrokVoiceSession"
+        private const val RESPONSE_TIMEOUT_MS = 20_000L
+        private const val AUDIO_CHUNK_LOG_INTERVAL = 50
     }
 }

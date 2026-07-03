@@ -7,7 +7,6 @@ import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.AutomaticGainControl
 import android.media.audiofx.NoiseSuppressor
 import android.util.Base64
-import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,10 +24,15 @@ class PcmAudioCapture {
     private val _audioLevel = MutableStateFlow(0f)
     val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
 
-    fun start(scope: CoroutineScope, onChunk: (String) -> Unit) {
+    fun start(
+        scope: CoroutineScope,
+        warmupMs: Long = CAPTURE_WARMUP_MS,
+        onChunk: (String) -> Unit,
+    ) {
         stop()
 
         val frameSamples = FRAME_SIZE_BYTES / BYTES_PER_SAMPLE
+        val warmupChunks = (warmupMs / FRAME_DURATION_MS).toInt().coerceAtLeast(0)
         val minBuffer = AudioRecord.getMinBufferSize(
             VoiceConstants.SAMPLE_RATE_HZ,
             AudioFormat.CHANNEL_IN_MONO,
@@ -54,17 +58,36 @@ class PcmAudioCapture {
         enableAudioEffects(record.audioSessionId)
         audioRecord = record
         record.startRecording()
-        Log.i(TAG, "Audio capture started")
+        VoiceLog.i(
+            "Mic",
+            "Capture started (rate=${VoiceConstants.SAMPLE_RATE_HZ}Hz, warmup=${warmupMs}ms, " +
+                "warmup_chunks=$warmupChunks, buffer=$bufferSize)",
+        )
 
         captureJob = scope.launch(Dispatchers.IO) {
             val buffer = ShortArray(frameSamples)
+            var chunksRead = 0
+            var chunksSent = 0
+            var warmupLogged = false
             while (isActive) {
                 val read = record.read(buffer, 0, buffer.size)
                 when {
                     read > 0 -> {
-                        _audioLevel.value = calculateLevel(buffer, read)
-                        val bytes = shortsToBytes(buffer, read)
-                        onChunk(Base64.encodeToString(bytes, Base64.NO_WRAP))
+                        val level = calculateLevel(buffer, read)
+                        _audioLevel.value = level
+                        if (chunksRead >= warmupChunks) {
+                            if (!warmupLogged) {
+                                VoiceLog.i("Mic", "Warmup complete — streaming audio to server")
+                                warmupLogged = true
+                            }
+                            val bytes = shortsToBytes(buffer, read)
+                            onChunk(Base64.encodeToString(bytes, Base64.NO_WRAP))
+                            chunksSent++
+                            if (chunksSent == 1 || chunksSent % MIC_LEVEL_LOG_INTERVAL == 0) {
+                                VoiceLog.d("Mic", "level=${"%.2f".format(level)} chunks_sent=$chunksSent")
+                            }
+                        }
+                        chunksRead++
                     }
                     read < 0 -> error("AudioRecord.read failed with code $read")
                 }
@@ -73,6 +96,9 @@ class PcmAudioCapture {
     }
 
     fun stop() {
+        if (audioRecord != null) {
+            VoiceLog.i("Mic", "Capture stopped")
+        }
         captureJob?.cancel()
         captureJob = null
         audioRecord?.run {
@@ -106,11 +132,12 @@ class PcmAudioCapture {
     }
 
     companion object {
-        private const val TAG = "PcmAudioCapture"
         private const val BYTES_PER_SAMPLE = 2
         private const val FRAME_DURATION_MS = 20.0
-        private const val FRAME_SIZE_BYTES =
+        const val FRAME_SIZE_BYTES =
             (VoiceConstants.SAMPLE_RATE_HZ * FRAME_DURATION_MS / 1000 * BYTES_PER_SAMPLE).toInt()
+        const val CAPTURE_WARMUP_MS = 1_200L
+        private const val MIC_LEVEL_LOG_INTERVAL = 50
     }
 
     private fun shortsToBytes(buffer: ShortArray, size: Int): ByteArray {

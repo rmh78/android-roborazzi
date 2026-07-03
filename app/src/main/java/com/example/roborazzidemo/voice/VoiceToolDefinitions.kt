@@ -121,8 +121,9 @@ object VoiceToolDefinitions {
                     "turn_detection",
                     JSONObject().apply {
                         put("type", "server_vad")
-                        put("threshold", 0.65)
-                        put("silence_duration_ms", 700)
+                        put("threshold", 0.75)
+                        put("silence_duration_ms", 800)
+                        put("prefix_padding_ms", 300)
                     },
                 )
                 put(
