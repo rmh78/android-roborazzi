@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Roborazzi Demo</string>
+    <string name="back">Back</string>
+
+    <string name="home_title">Roborazzi Demo</string>
+    <string name="home_subtitle">Explore screens and screenshot-test composables with Roborazzi.</string>
+    <string name="home_browse_items">Browse Items</string>
+    <string name="home_view_sample_detail">View Sample Detail</string>
+
+    <string name="items_title">Items</string>
+    <string name="item_not_found_title">Item not found</string>
+    <string name="item_not_found_message">No item exists for this id. Use the back button to return.</string>
+
+    <string name="icon_desc_star">Favorite item</string>
+    <string name="icon_desc_folder">Folder item</string>
+    <string name="icon_desc_person">Person item</string>
+    <string name="icon_desc_settings">Settings item</string>
+    <string name="icon_desc_shopping_cart">Shopping item</string>
+    <string name="icon_desc_email">Message item</string>
+    <string name="icon_desc_image">Photo item</string>
+    <string name="icon_desc_music">Music item</string>
+    <string name="icon_desc_restaurant">Restaurant item</string>
+    <string name="icon_desc_place">Travel item</string>
+
+    <string name="item_desc_short">Short note.</string>
+    <string name="item_desc_medium">A medium-length description that spans a couple of lines when rendered in the list row layout.</string>
+    <string name="item_desc_long">A longer description with more detail. This item includes extra context so the row grows taller and stands out when scrolling through the list alongside compact entries.</string>
+    <string name="item_desc_brief">Brief.</string>
+    <string name="item_desc_medium_alt">Another medium entry explaining what this item represents and why you might tap it for more information.</string>
+</resources>
