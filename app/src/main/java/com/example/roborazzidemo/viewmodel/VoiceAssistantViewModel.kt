@@ -32,14 +32,15 @@ data class VoiceUiState(
     val transcriptLines: List<TranscriptLine> = emptyList(),
     val lastToolName: String = "",
     val errorMessage: String? = null,
-    val canConnect: Boolean = true,
+    val hasApiKey: Boolean = true,
+    val hasMicrophonePermission: Boolean = false,
 )
 
 class VoiceAssistantViewModel(
     private val apiKey: String,
     private val toolExecutor: VoiceToolExecutor,
 ) : ViewModel(), VoiceSessionListener {
-    private val _uiState = MutableStateFlow(VoiceUiState(canConnect = apiKey != "no-api-key"))
+    private val _uiState = MutableStateFlow(VoiceUiState(hasApiKey = apiKey != "no-api-key"))
     val uiState: StateFlow<VoiceUiState> = _uiState.asStateFlow()
 
     private var session: GrokVoiceSession? = null
@@ -50,8 +51,8 @@ class VoiceAssistantViewModel(
         }
     }
 
-    fun setConnectEnabled(enabled: Boolean) {
-        _uiState.update { it.copy(canConnect = enabled) }
+    fun setMicrophonePermissionGranted(granted: Boolean) {
+        _uiState.update { it.copy(hasMicrophonePermission = granted) }
     }
 
     fun connect() {

@@ -42,7 +42,7 @@ fun VoiceAssistantRoot(
 
         val uiState by viewModel.uiState.collectAsState()
         DisposableEffect(hasRecordAudioPermission) {
-            viewModel.setConnectEnabled(hasRecordAudioPermission)
+            viewModel.setMicrophonePermissionGranted(hasRecordAudioPermission)
             onDispose { }
         }
 

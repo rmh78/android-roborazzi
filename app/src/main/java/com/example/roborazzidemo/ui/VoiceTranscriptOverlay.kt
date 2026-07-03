@@ -18,8 +18,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.roborazzidemo.viewmodel.TranscriptLine
@@ -32,13 +34,12 @@ fun VoiceTranscriptOverlay(
     onConnectChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val showPanel = state.isConnected || state.errorMessage != null || state.canConnect
-    if (!showPanel) return
-
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(16.dp),
+            .navigationBarsPadding()
+            .padding(16.dp)
+            .testTag("voice_assistant_overlay"),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
         tonalElevation = 6.dp,
@@ -63,13 +64,14 @@ fun VoiceTranscriptOverlay(
                     Switch(
                         checked = state.isConnected,
                         onCheckedChange = onConnectChange,
-                        enabled = state.canConnect,
+                        enabled = state.hasApiKey,
+                        modifier = Modifier.testTag("voice_connect_switch"),
                     )
                 }
             }
 
             Text(
-                text = state.status,
+                text = disconnectedStatus(state),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -165,6 +167,13 @@ private fun LiveTranscriptLine(prefix: String, text: String) {
             style = MaterialTheme.typography.bodyMedium,
         )
     }
+}
+
+private fun disconnectedStatus(state: VoiceUiState): String {
+    if (state.isConnected) return state.status
+    if (!state.hasApiKey) return "Set XAI_API_KEY before building the app."
+    if (!state.hasMicrophonePermission) return "Tap Connect to grant microphone access."
+    return state.status
 }
 
 private fun buildTranscriptText(
