@@ -39,6 +39,7 @@ class GrokVoiceSession(
     private var responseWatchdogJob: Job? = null
     private var activeResponseId: String? = null
     private var audioChunksSent = 0
+    private var micPausedForTextInject = false
 
     val audioLevel = audioCapture.audioLevel
 
@@ -61,13 +62,13 @@ class GrokVoiceSession(
         val request = Request.Builder()
             .url(VoiceConstants.REALTIME_URL)
             .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("OpenAI-Beta", "realtime=v1")
             .build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 VoiceLog.i("Session", "WebSocket open (HTTP ${response.code})")
-                listener.onStatusChanged("Configuring session…")
-                sendSessionUpdate(webSocket)
+                listener.onStatusChanged("Waiting for conversation…")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -107,6 +108,51 @@ class GrokVoiceSession(
         if (notifyListener) {
             listener.onDisconnected()
         }
+    }
+
+    fun sendTextMessage(text: String) {
+        val socket = webSocket ?: run {
+            VoiceLog.w("Session", "sendTextMessage dropped — socket null")
+            return
+        }
+        if (!sessionConfigured) {
+            VoiceLog.w("Session", "sendTextMessage dropped — session not configured")
+            return
+        }
+        clearResponseWatchdog()
+        if (audioCapture.isCapturing()) {
+            audioCapture.stop()
+            micPausedForTextInject = true
+            VoiceLog.clientEvent("input_audio_buffer.clear (before text inject)")
+            socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
+        }
+        VoiceLog.clientEvent("conversation.item.create (text: $text)")
+        socket.send(
+            JSONObject().apply {
+                put("type", "conversation.item.create")
+                put(
+                    "item",
+                    JSONObject().apply {
+                        put("type", "message")
+                        put("role", "user")
+                        put(
+                            "content",
+                            org.json.JSONArray().apply {
+                                put(
+                                    JSONObject().apply {
+                                        put("type", "input_text")
+                                        put("text", text)
+                                    },
+                                )
+                            },
+                        )
+                    },
+                )
+            }.toString(),
+        )
+        VoiceLog.clientEvent("response.create (after text message)")
+        socket.send(JSONObject().put("type", "response.create").toString())
+        scheduleResponseWatchdog(socket)
     }
 
     fun sendToolResult(output: String, callId: String) {
@@ -165,7 +211,11 @@ class GrokVoiceSession(
                     )
                 }
             }
-            "session.created", "conversation.created" -> Unit
+            "session.created" -> Unit
+            "conversation.created" -> {
+                listener.onStatusChanged("Configuring session…")
+                sendSessionUpdate(socket)
+            }
             "session.updated" -> {
                 if (!sessionConfigured) {
                     sessionConfigured = true
@@ -206,17 +256,23 @@ class GrokVoiceSession(
                 VoiceLog.i("Session", "Response started (id=$activeResponseId)")
                 listener.onStatusChanged("Grok is responding…")
             }
-            "response.output_audio.delta" -> {
+            "response.output_audio.delta",
+            "response.audio.delta",
+            -> {
                 clearResponseWatchdog()
                 audioPlayback.playBase64Chunk(json.optString("delta", ""))
             }
-            "response.output_audio_transcript.delta" -> {
+            "response.output_audio_transcript.delta",
+            "response.audio_transcript.delta",
+            -> {
                 val delta = json.optString("delta", "")
                 if (delta.isNotEmpty()) {
                     listener.onAssistantTranscriptDelta(delta)
                 }
             }
-            "response.output_audio_transcript.done" -> {
+            "response.output_audio_transcript.done",
+            "response.audio_transcript.done",
+            -> {
                 listener.onAssistantTranscriptDone()
             }
             "response.function_call_arguments.done" -> {
@@ -232,6 +288,10 @@ class GrokVoiceSession(
                 VoiceLog.i("Session", "Response complete")
                 if (sessionConfigured) {
                     listener.onStatusChanged("Listening")
+                    if (micPausedForTextInject) {
+                        micPausedForTextInject = false
+                        startAudioCaptureAfterWarmup()
+                    }
                 }
             }
             "error" -> {
@@ -261,11 +321,7 @@ class GrokVoiceSession(
                 )
             }
             listener.onStatusChanged("Listening")
-            VoiceLog.i(
-                "Session",
-                "Mic streaming active (warmup=${PcmAudioCapture.CAPTURE_WARMUP_MS}ms, " +
-                    "chunk=${PcmAudioCapture.FRAME_SIZE_BYTES}B)",
-            )
+            VoiceLog.i("Session", "Mic streaming active (100ms PCM16 chunks)")
         } catch (e: Exception) {
             VoiceLog.e("Session", "Audio capture failed", e)
             listener.onError(e.message ?: "Microphone capture failed")

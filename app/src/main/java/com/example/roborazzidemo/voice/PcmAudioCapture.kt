@@ -3,9 +3,6 @@ package com.example.roborazzidemo.voice
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.AutomaticGainControl
-import android.media.audiofx.NoiseSuppressor
 import android.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +12,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.sqrt
 
 class PcmAudioCapture {
@@ -26,74 +25,94 @@ class PcmAudioCapture {
 
     fun start(
         scope: CoroutineScope,
-        warmupMs: Long = CAPTURE_WARMUP_MS,
         onChunk: (String) -> Unit,
     ) {
         stop()
 
-        val frameSamples = FRAME_SIZE_BYTES / BYTES_PER_SAMPLE
-        val warmupChunks = (warmupMs / FRAME_DURATION_MS).toInt().coerceAtLeast(0)
         val minBuffer = AudioRecord.getMinBufferSize(
             VoiceConstants.SAMPLE_RATE_HZ,
             AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
+            AudioFormat.ENCODING_PCM_FLOAT,
         )
         if (minBuffer <= 0) {
-            error("Microphone does not support ${VoiceConstants.SAMPLE_RATE_HZ}Hz PCM capture")
+            error("Microphone does not support ${VoiceConstants.SAMPLE_RATE_HZ}Hz PCM_FLOAT capture")
         }
-        val bufferSize = minBuffer.coerceAtLeast(FRAME_SIZE_BYTES * 4)
 
-        val record = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            VoiceConstants.SAMPLE_RATE_HZ,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize,
-        )
+        val record = AudioRecord.Builder()
+            .setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setSampleRate(VoiceConstants.SAMPLE_RATE_HZ)
+                    .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+                    .build(),
+            )
+            .setBufferSizeInBytes(minBuffer * 2)
+            .build()
+
         if (record.state != AudioRecord.STATE_INITIALIZED) {
             record.release()
             error("AudioRecord failed to initialize")
         }
 
-        enableAudioEffects(record.audioSessionId)
         audioRecord = record
         record.startRecording()
         VoiceLog.i(
             "Mic",
-            "Capture started (rate=${VoiceConstants.SAMPLE_RATE_HZ}Hz, warmup=${warmupMs}ms, " +
-                "warmup_chunks=$warmupChunks, buffer=$bufferSize)",
+            "Capture started (rate=${VoiceConstants.SAMPLE_RATE_HZ}Hz, chunk=${CHUNK_DURATION_MS}ms, " +
+                "encoding=PCM_FLOAT)",
         )
 
         captureJob = scope.launch(Dispatchers.IO) {
-            val buffer = ShortArray(frameSamples)
-            var chunksRead = 0
+            val readBuffer = FloatArray(READ_BUFFER_SAMPLES)
+            val pendingChunks = mutableListOf<FloatArray>()
+            var pendingSamples = 0
             var chunksSent = 0
-            var warmupLogged = false
+
             while (isActive) {
-                val read = record.read(buffer, 0, buffer.size)
+                val read = record.read(readBuffer, 0, readBuffer.size, AudioRecord.READ_BLOCKING)
                 when {
                     read > 0 -> {
-                        val level = calculateLevel(buffer, read)
-                        _audioLevel.value = level
-                        if (chunksRead >= warmupChunks) {
-                            if (!warmupLogged) {
-                                VoiceLog.i("Mic", "Warmup complete — streaming audio to server")
-                                warmupLogged = true
+                        val samples = readBuffer.copyOf(read)
+                        _audioLevel.value = calculateLevel(samples)
+                        pendingChunks.add(samples)
+                        pendingSamples += read
+
+                        while (pendingSamples >= CHUNK_SIZE_SAMPLES) {
+                            val chunk = FloatArray(CHUNK_SIZE_SAMPLES)
+                            var offset = 0
+                            while (offset < CHUNK_SIZE_SAMPLES && pendingChunks.isNotEmpty()) {
+                                val buffer = pendingChunks.first()
+                                val needed = CHUNK_SIZE_SAMPLES - offset
+                                if (buffer.size <= needed) {
+                                    System.arraycopy(buffer, 0, chunk, offset, buffer.size)
+                                    offset += buffer.size
+                                    pendingSamples -= buffer.size
+                                    pendingChunks.removeAt(0)
+                                } else {
+                                    System.arraycopy(buffer, 0, chunk, offset, needed)
+                                    pendingChunks[0] = buffer.copyOfRange(needed, buffer.size)
+                                    offset += needed
+                                    pendingSamples -= needed
+                                }
                             }
-                            val bytes = shortsToBytes(buffer, read)
-                            onChunk(Base64.encodeToString(bytes, Base64.NO_WRAP))
+                            onChunk(float32ToPcm16Base64(chunk))
                             chunksSent++
                             if (chunksSent == 1 || chunksSent % MIC_LEVEL_LOG_INTERVAL == 0) {
-                                VoiceLog.d("Mic", "level=${"%.2f".format(level)} chunks_sent=$chunksSent")
+                                VoiceLog.d(
+                                    "Mic",
+                                    "level=${"%.2f".format(_audioLevel.value)} chunks_sent=$chunksSent",
+                                )
                             }
                         }
-                        chunksRead++
                     }
                     read < 0 -> error("AudioRecord.read failed with code $read")
                 }
             }
         }
     }
+
+    fun isCapturing(): Boolean = captureJob?.isActive == true
 
     fun stop() {
         if (audioRecord != null) {
@@ -109,44 +128,31 @@ class PcmAudioCapture {
         _audioLevel.value = 0f
     }
 
-    private fun enableAudioEffects(audioSessionId: Int) {
-        if (NoiseSuppressor.isAvailable()) {
-            NoiseSuppressor.create(audioSessionId)?.enabled = true
+    private fun calculateLevel(samples: FloatArray): Float {
+        if (samples.isEmpty()) return 0f
+        var sum = 0.0
+        for (sample in samples) {
+            sum += (sample * sample).toDouble()
         }
-        if (AcousticEchoCanceler.isAvailable()) {
-            AcousticEchoCanceler.create(audioSessionId)?.enabled = true
-        }
-        if (AutomaticGainControl.isAvailable()) {
-            AutomaticGainControl.create(audioSessionId)?.enabled = true
-        }
+        return sqrt(sum / samples.size).toFloat().coerceIn(0f, 1f)
     }
 
-    private fun calculateLevel(buffer: ShortArray, size: Int): Float {
-        if (size == 0) return 0f
-        var sum = 0.0
-        for (i in 0 until size) {
-            val sample = buffer[i].toDouble() / Short.MAX_VALUE
-            sum += sample * sample
+    private fun float32ToPcm16Base64(samples: FloatArray): String {
+        val shorts = ShortArray(samples.size)
+        for (i in samples.indices) {
+            val sample = (samples[i] * 32767f).coerceIn(-32768f, 32767f)
+            shorts[i] = sample.toInt().toShort()
         }
-        return (sqrt(sum / size) * 4.0).toFloat().coerceIn(0f, 1f)
+        val bytes = ByteArray(shorts.size * 2)
+        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().put(shorts)
+        return Base64.encodeToString(bytes, Base64.NO_WRAP)
     }
 
     companion object {
-        private const val BYTES_PER_SAMPLE = 2
-        private const val FRAME_DURATION_MS = 20.0
-        const val FRAME_SIZE_BYTES =
-            (VoiceConstants.SAMPLE_RATE_HZ * FRAME_DURATION_MS / 1000 * BYTES_PER_SAMPLE).toInt()
-        const val CAPTURE_WARMUP_MS = 1_200L
-        private const val MIC_LEVEL_LOG_INTERVAL = 50
-    }
-
-    private fun shortsToBytes(buffer: ShortArray, size: Int): ByteArray {
-        val bytes = ByteArray(size * 2)
-        for (i in 0 until size) {
-            val value = buffer[i].toInt()
-            bytes[i * 2] = (value and 0xFF).toByte()
-            bytes[i * 2 + 1] = (value shr 8 and 0xFF).toByte()
-        }
-        return bytes
+        private const val CHUNK_DURATION_MS = 100
+        private const val READ_BUFFER_SAMPLES = 4096
+        private const val CHUNK_SIZE_SAMPLES =
+            VoiceConstants.SAMPLE_RATE_HZ * CHUNK_DURATION_MS / 1000
+        private const val MIC_LEVEL_LOG_INTERVAL = 10
     }
 }
