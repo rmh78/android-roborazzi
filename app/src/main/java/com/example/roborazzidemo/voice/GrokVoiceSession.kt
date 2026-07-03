@@ -51,11 +51,12 @@ class GrokVoiceSession(
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "WebSocket open")
-                listener.onStatusChanged("Connecting…")
+                listener.onStatusChanged("Configuring session…")
+                sendSessionUpdate(webSocket)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                handleServerEvent(text)
+                handleServerEvent(webSocket, text)
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -98,17 +99,48 @@ class GrokVoiceSession(
         socket.send(JSONObject().put("type", "response.create").toString())
     }
 
-    private fun handleServerEvent(raw: String) {
-        val json = JSONObject(raw)
-        when (json.getString("type")) {
-            "conversation.created" -> {
-                webSocket?.send(VoiceToolDefinitions.sessionUpdateJson().toString())
+    private fun sendSessionUpdate(socket: WebSocket) {
+        if (sessionConfigured) return
+        val payload = VoiceToolDefinitions.sessionUpdateJson().toString()
+        Log.d(TAG, "Sending session.update")
+        socket.send(payload)
+    }
+
+    private fun handleServerEvent(socket: WebSocket, raw: String) {
+        val json = try {
+            JSONObject(raw)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse server event", e)
+            return
+        }
+
+        val type = json.optString("type", "unknown")
+        Log.d(TAG, "Server event: $type")
+
+        when (type) {
+            "ping" -> {
+                val timestamp = json.optLong("timestamp", -1L)
+                if (timestamp >= 0L) {
+                    socket.send(
+                        JSONObject().apply {
+                            put("type", "pong")
+                            put("ping_timestamp", timestamp)
+                        }.toString(),
+                    )
+                }
+            }
+            "session.created", "conversation.created" -> {
+                if (!sessionConfigured) {
+                    sendSessionUpdate(socket)
+                }
             }
             "session.updated" -> {
-                sessionConfigured = true
-                listener.onSessionReady()
-                listener.onStatusChanged("Listening")
-                startAudioCapture()
+                if (!sessionConfigured) {
+                    sessionConfigured = true
+                    listener.onSessionReady()
+                    listener.onStatusChanged("Listening")
+                    startAudioCapture()
+                }
             }
             "input_audio_buffer.speech_started" -> {
                 listener.onUserSpeechStarted()
@@ -156,20 +188,28 @@ class GrokVoiceSession(
             }
             "error" -> {
                 val message = json.optJSONObject("error")?.optString("message")
+                    ?: json.optString("error")
                     ?: json.optString("message", "Unknown voice API error")
+                Log.e(TAG, "Voice API error: $message")
                 listener.onError(message)
             }
+            else -> Unit
         }
     }
 
     private fun startAudioCapture() {
-        audioCapture.start(scope) { base64Chunk ->
-            webSocket?.send(
-                JSONObject().apply {
-                    put("type", "input_audio_buffer.append")
-                    put("audio", base64Chunk)
-                }.toString(),
-            )
+        try {
+            audioCapture.start(scope) { base64Chunk ->
+                webSocket?.send(
+                    JSONObject().apply {
+                        put("type", "input_audio_buffer.append")
+                        put("audio", base64Chunk)
+                    }.toString(),
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Audio capture failed", e)
+            listener.onError(e.message ?: "Microphone capture failed")
         }
     }
 

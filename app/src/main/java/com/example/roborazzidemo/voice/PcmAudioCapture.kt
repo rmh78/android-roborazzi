@@ -3,7 +3,11 @@ package com.example.roborazzidemo.voice
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import android.util.Base64
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,15 +28,19 @@ class PcmAudioCapture {
     fun start(scope: CoroutineScope, onChunk: (String) -> Unit) {
         stop()
 
+        val frameSamples = FRAME_SIZE_BYTES / BYTES_PER_SAMPLE
         val minBuffer = AudioRecord.getMinBufferSize(
             VoiceConstants.SAMPLE_RATE_HZ,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
-        val bufferSize = minBuffer.coerceAtLeast(VoiceConstants.SAMPLE_RATE_HZ / 10)
+        if (minBuffer <= 0) {
+            error("Microphone does not support ${VoiceConstants.SAMPLE_RATE_HZ}Hz PCM capture")
+        }
+        val bufferSize = minBuffer.coerceAtLeast(FRAME_SIZE_BYTES * 4)
 
         val record = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
             VoiceConstants.SAMPLE_RATE_HZ,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
@@ -43,17 +51,22 @@ class PcmAudioCapture {
             error("AudioRecord failed to initialize")
         }
 
+        enableAudioEffects(record.audioSessionId)
         audioRecord = record
         record.startRecording()
+        Log.i(TAG, "Audio capture started")
 
         captureJob = scope.launch(Dispatchers.IO) {
-            val buffer = ShortArray(bufferSize / 2)
+            val buffer = ShortArray(frameSamples)
             while (isActive) {
                 val read = record.read(buffer, 0, buffer.size)
-                if (read > 0) {
-                    _audioLevel.value = calculateLevel(buffer, read)
-                    val bytes = shortsToBytes(buffer, read)
-                    onChunk(Base64.encodeToString(bytes, Base64.NO_WRAP))
+                when {
+                    read > 0 -> {
+                        _audioLevel.value = calculateLevel(buffer, read)
+                        val bytes = shortsToBytes(buffer, read)
+                        onChunk(Base64.encodeToString(bytes, Base64.NO_WRAP))
+                    }
+                    read < 0 -> error("AudioRecord.read failed with code $read")
                 }
             }
         }
@@ -70,6 +83,18 @@ class PcmAudioCapture {
         _audioLevel.value = 0f
     }
 
+    private fun enableAudioEffects(audioSessionId: Int) {
+        if (NoiseSuppressor.isAvailable()) {
+            NoiseSuppressor.create(audioSessionId)?.enabled = true
+        }
+        if (AcousticEchoCanceler.isAvailable()) {
+            AcousticEchoCanceler.create(audioSessionId)?.enabled = true
+        }
+        if (AutomaticGainControl.isAvailable()) {
+            AutomaticGainControl.create(audioSessionId)?.enabled = true
+        }
+    }
+
     private fun calculateLevel(buffer: ShortArray, size: Int): Float {
         if (size == 0) return 0f
         var sum = 0.0
@@ -78,6 +103,14 @@ class PcmAudioCapture {
             sum += sample * sample
         }
         return (sqrt(sum / size) * 4.0).toFloat().coerceIn(0f, 1f)
+    }
+
+    companion object {
+        private const val TAG = "PcmAudioCapture"
+        private const val BYTES_PER_SAMPLE = 2
+        private const val FRAME_DURATION_MS = 20.0
+        private const val FRAME_SIZE_BYTES =
+            (VoiceConstants.SAMPLE_RATE_HZ * FRAME_DURATION_MS / 1000 * BYTES_PER_SAMPLE).toInt()
     }
 
     private fun shortsToBytes(buffer: ShortArray, size: Int): ByteArray {
