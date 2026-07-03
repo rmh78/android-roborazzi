@@ -14,6 +14,9 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
+
+        val apiKey = providers.environmentVariable("XAI_API_KEY").orElse("no-api-key").get()
+        buildConfigField("String", "XAI_API_KEY", "\"$apiKey\"")
     }
 
     buildTypes {
@@ -35,6 +38,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -61,6 +65,9 @@ roborazzi {
 }
 
 dependencies {
+    implementation(libs.core.ktx)
+    implementation(libs.lifecycle.runtime.ktx)
+    implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.activity.compose)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
@@ -68,6 +75,7 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.core)
     implementation(libs.navigation.compose)
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)

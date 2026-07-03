@@ -85,6 +85,30 @@ app/
     └── *Test.kt                    # Per-screen and navigation tests
 ```
 
+## Voice navigation (Grok Voice Agent API)
+
+The app supports hands-free navigation and screen description via the [xAI Voice Agent API](https://docs.x.ai/developers/model-capabilities/audio/voice-agent).
+
+### Setup
+
+1. Set your API key before building:
+
+```bash
+export XAI_API_KEY=your-key-here
+./gradlew :app:installDebug
+```
+
+2. Run on an emulator or device with microphone access.
+3. Grant **Record audio** when prompted.
+4. Toggle **Connect** on the voice overlay at the bottom of the screen.
+5. Speak naturally — for example:
+   - "Go to the items list"
+   - "Open item 3"
+   - "Go back"
+   - "What is on this screen?"
+
+The overlay shows live captions for your speech and Grok's spoken replies. Navigation and screen reading use Voice API function calling (`navigate_to_screen`, `navigate_back`, `open_list_item`, `describe_screen`).
+
 ## License
 
 Demo project — use as a reference for your own Roborazzi setup.
