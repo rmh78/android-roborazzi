@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import com.example.roborazzidemo.ui.HomeScreen
 import org.junit.Test
+import org.robolectric.annotation.Config
 
 class HomeScreenTest : RoborazziComposeTest() {
     @Test
@@ -36,5 +37,20 @@ class HomeScreenTest : RoborazziComposeTest() {
         composeTestRule.onNodeWithText("Browse Items").assertIsDisplayed()
         composeTestRule.onNodeWithText("View Sample Detail").assertIsDisplayed()
         captureScreenshot(GoldenImages.HOME_DARK)
+    }
+
+    @Test
+    @Config(fontScale = 1.5f)
+    fun homeScreen_largeFont() {
+        setThemedContent {
+            HomeScreen(
+                onBrowseItems = {},
+                onViewSampleDetail = {},
+            )
+        }
+
+        composeTestRule.onNodeWithText("Browse Items").assertIsDisplayed()
+        composeTestRule.onNodeWithText("View Sample Detail").assertIsDisplayed()
+        captureScreenshot(GoldenImages.HOME_FONT_SCALE_1_5)
     }
 }

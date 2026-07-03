@@ -3,6 +3,7 @@ package com.example.roborazzidemo
 object GoldenImages {
     const val HOME_DEFAULT = "HomeScreen_default"
     const val HOME_DARK = "HomeScreen_dark"
+    const val HOME_FONT_SCALE_1_5 = "HomeScreen_font_scale_1_5"
     const val ITEM_LIST_SCROLL_TOP = "ItemListScreen_scroll_top"
     const val ITEM_LIST_SCROLL_MIDDLE = "ItemListScreen_scroll_middle"
     const val ITEM_LIST_SCROLL_BOTTOM = "ItemListScreen_scroll_bottom"
