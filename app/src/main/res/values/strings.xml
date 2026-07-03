@@ -3,7 +3,7 @@
     <string name="app_name">Roborazzi Demo</string>
     <string name="back">Back</string>
 
-    <string name="home_title">Roborazzi Demo</string>
+    <string name="home_title">Roborazzi Demo [CI Failure Test]</string>
     <string name="home_subtitle">Explore screens and screenshot-test composables with Roborazzi.</string>
     <string name="home_browse_items">Browse Items</string>
     <string name="home_view_sample_detail">View Sample Detail</string>
