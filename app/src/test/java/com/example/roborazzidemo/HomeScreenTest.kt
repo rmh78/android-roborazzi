@@ -3,8 +3,9 @@ package com.example.roborazzidemo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import com.example.roborazzidemo.ui.HomeScreen
+import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import org.junit.Test
-import org.robolectric.annotation.Config
+import org.robolectric.RuntimeEnvironment
 
 class HomeScreenTest : RoborazziComposeTest() {
     @Test
@@ -40,17 +41,38 @@ class HomeScreenTest : RoborazziComposeTest() {
     }
 
     @Test
-    @Config(fontScale = 1.5f)
-    fun homeScreen_largeFont() {
-        setThemedContent {
-            HomeScreen(
-                onBrowseItems = {},
-                onViewSampleDetail = {},
-            )
+    fun homeScreen_screenResolutions() {
+        homeScreenResolutions.forEach { resolution ->
+            homeScreenThemes.forEach { (theme, darkTheme) ->
+                RuntimeEnvironment.setQualifiers(resolution.qualifier)
+                captureThemedRoboImage(
+                    name = GoldenImages.homeScreenResolution(resolution.slug, theme),
+                    darkTheme = darkTheme,
+                ) {
+                    HomeScreen(
+                        onBrowseItems = {},
+                        onViewSampleDetail = {},
+                    )
+                }
+            }
         }
+    }
 
-        composeTestRule.onNodeWithText("Browse Items").assertIsDisplayed()
-        composeTestRule.onNodeWithText("View Sample Detail").assertIsDisplayed()
-        captureScreenshot(GoldenImages.HOME_FONT_SCALE_1_5)
+    private data class ScreenResolution(
+        val slug: String,
+        val qualifier: String,
+    )
+
+    private companion object {
+        val homeScreenResolutions = listOf(
+            ScreenResolution("pixel5", RobolectricDeviceQualifiers.Pixel5),
+            ScreenResolution("small_phone", RobolectricDeviceQualifiers.SmallPhone),
+            ScreenResolution("medium_tablet", RobolectricDeviceQualifiers.MediumTablet),
+        )
+
+        val homeScreenThemes = listOf(
+            "day" to false,
+            "night" to true,
+        )
     }
 }
