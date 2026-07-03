@@ -56,6 +56,10 @@ java {
     }
 }
 
+roborazzi {
+    outputDir.set(file("src/screenshots"))
+}
+
 dependencies {
     implementation(libs.activity.compose)
     implementation(platform(libs.compose.bom))

@@ -9,7 +9,7 @@ The app navigates between a home screen, an item list, item details, and a not-f
 - Kotlin 2.4, Compose, Navigation Compose
 - Roborazzi 1.64 + Robolectric 4.16
 - JDK 21
-- Golden images stored as WebP in `app/`
+- Golden images stored as WebP in `app/src/screenshots/`
 
 ## Prerequisites
 
@@ -46,7 +46,7 @@ When you intentionally change the UI, record new goldens:
   -Proborazzi.test.record=true
 ```
 
-Commit the updated `app/*.webp` files together with your code changes.
+Commit the updated `app/src/screenshots/*.webp` files together with your code changes.
 
 ## What's tested
 
@@ -77,7 +77,7 @@ For the full report, download the `roborazzi-diffs` artifact from the failed run
 
 ```
 app/
-├── *.webp                          # Golden images (committed)
+├── src/screenshots/                # Golden images (committed)
 ├── src/main/                       # Compose UI + navigation
 └── src/test/
     ├── RoborazziComposeTest.kt     # Shared test base class
