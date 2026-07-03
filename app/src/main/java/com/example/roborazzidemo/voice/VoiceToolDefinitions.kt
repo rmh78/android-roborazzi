@@ -116,12 +116,12 @@ object VoiceToolDefinitions {
             JSONObject().apply {
                 put("voice", VoiceConstants.VOICE_ID)
                 put("instructions", sessionInstructions)
-                put("reasoning", JSONObject().put("effort", "high"))
+                put("reasoning", JSONObject().put("effort", "none"))
                 put(
                     "turn_detection",
                     JSONObject().apply {
                         put("type", "server_vad")
-                        put("threshold", 0.5)
+                        put("threshold", 0.65)
                         put("silence_duration_ms", 700)
                     },
                 )

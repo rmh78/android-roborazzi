@@ -33,6 +33,7 @@ class GrokVoiceSession(
     private val audioPlayback = PcmAudioPlayback()
     private var webSocket: WebSocket? = null
     private var sessionConfigured = false
+    private var sessionUpdateSent = false
 
     val audioLevel = audioCapture.audioLevel
 
@@ -42,6 +43,8 @@ class GrokVoiceSession(
 
     fun connect() {
         if (webSocket != null) return
+        sessionConfigured = false
+        sessionUpdateSent = false
 
         val request = Request.Builder()
             .url(VoiceConstants.REALTIME_URL)
@@ -62,23 +65,31 @@ class GrokVoiceSession(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WebSocket failure", t)
                 listener.onError(t.message ?: "Connection failed")
-                disconnect()
+                cleanupConnection(notifyListener = true)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "WebSocket closed: $code $reason")
-                listener.onDisconnected()
+                cleanupConnection(notifyListener = this@GrokVoiceSession.webSocket != null)
             }
         })
     }
 
     fun disconnect() {
+        if (webSocket == null) return
+        webSocket?.close(1000, "Client disconnect")
+        cleanupConnection(notifyListener = true)
+    }
+
+    private fun cleanupConnection(notifyListener: Boolean) {
         audioCapture.stop()
         audioPlayback.stop()
-        webSocket?.close(1000, "Client disconnect")
         webSocket = null
         sessionConfigured = false
-        listener.onDisconnected()
+        sessionUpdateSent = false
+        if (notifyListener) {
+            listener.onDisconnected()
+        }
     }
 
     fun sendToolResult(output: String, callId: String) {
@@ -100,7 +111,8 @@ class GrokVoiceSession(
     }
 
     private fun sendSessionUpdate(socket: WebSocket) {
-        if (sessionConfigured) return
+        if (sessionUpdateSent) return
+        sessionUpdateSent = true
         val payload = VoiceToolDefinitions.sessionUpdateJson().toString()
         Log.d(TAG, "Sending session.update")
         socket.send(payload)
@@ -129,11 +141,7 @@ class GrokVoiceSession(
                     )
                 }
             }
-            "session.created", "conversation.created" -> {
-                if (!sessionConfigured) {
-                    sendSessionUpdate(socket)
-                }
-            }
+            "session.created", "conversation.created" -> Unit
             "session.updated" -> {
                 if (!sessionConfigured) {
                     sessionConfigured = true
