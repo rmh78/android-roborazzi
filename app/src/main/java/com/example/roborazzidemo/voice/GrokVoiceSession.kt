@@ -40,6 +40,7 @@ class GrokVoiceSession(
     private var activeResponseId: String? = null
     private var audioChunksSent = 0
     private var micPausedForTextInject = false
+    private var activeResponseHadAudio = false
 
     val audioLevel = audioCapture.audioLevel
 
@@ -253,6 +254,7 @@ class GrokVoiceSession(
             "response.created" -> {
                 clearResponseWatchdog()
                 activeResponseId = json.optJSONObject("response")?.optString("id")
+                activeResponseHadAudio = false
                 VoiceLog.i("Session", "Response started (id=$activeResponseId)")
                 listener.onStatusChanged("Grok is responding…")
             }
@@ -260,6 +262,7 @@ class GrokVoiceSession(
             "response.audio.delta",
             -> {
                 clearResponseWatchdog()
+                activeResponseHadAudio = true
                 audioPlayback.playBase64Chunk(json.optString("delta", ""))
             }
             "response.output_audio_transcript.delta",
@@ -284,11 +287,13 @@ class GrokVoiceSession(
             }
             "response.done" -> {
                 clearResponseWatchdog()
+                val hadAudio = activeResponseHadAudio
                 activeResponseId = null
-                VoiceLog.i("Session", "Response complete")
+                activeResponseHadAudio = false
+                VoiceLog.i("Session", "Response complete (had_audio=$hadAudio)")
                 if (sessionConfigured) {
                     listener.onStatusChanged("Listening")
-                    if (micPausedForTextInject) {
+                    if (micPausedForTextInject && hadAudio) {
                         micPausedForTextInject = false
                         startAudioCaptureAfterWarmup()
                     }

@@ -21,7 +21,23 @@ class VoiceE2eLogVerifierTest {
     }
 
     @Test
-    fun verifyTextTurnSequence_passesForOrderedNavigationTurn() {
+    fun verifyTextTurnSequence_passesForDirectSpokenResponse() {
+        val log = """
+            I VoiceAssistant: [Debug] Forwarding text to session: Say a brief hello
+            D VoiceAssistant: [Session] → conversation.item.create (text: Say a brief hello)
+            D VoiceAssistant: [Session] → response.create (after text message)
+            I VoiceAssistant: [Debug] Injected text command: Say a brief hello
+            D VoiceAssistant: [Session] ← response.created | response_id=abc
+            D VoiceAssistant: [Session] ← response.audio.delta | bytes=35840
+            D VoiceAssistant: [Session] ← response.done | response_id=abc
+        """.trimIndent()
+
+        val result = VoiceE2eLogVerifier.verifyTextTurnSequence(log)
+        assertTrue(result.failures.toString(), result.passed)
+    }
+
+    @Test
+    fun verifyTextTurnSequence_failsWhenToolDonePrecedesAudio() {
         val log = """
             I VoiceAssistant: [Debug] Forwarding text to session: Go to the items list
             D VoiceAssistant: [Session] → conversation.item.create (text: Go to the items list)
@@ -30,30 +46,13 @@ class VoiceE2eLogVerifierTest {
             D VoiceAssistant: [Session] ← response.created | response_id=abc
             D VoiceAssistant: [Session] ← response.function_call_arguments.done | tool=navigate_to_screen
             D VoiceAssistant: [Session] ← response.done | response_id=abc
-            D VoiceAssistant: [Session] → conversation.item.create (function_call_output, call_id=x)
-            D VoiceAssistant: [Session] → response.create (after tool result)
-            D VoiceAssistant: [Session] ← response.created | response_id=def
             D VoiceAssistant: [Session] ← response.audio.delta | bytes=35840
             D VoiceAssistant: [Session] ← response.done | response_id=def
         """.trimIndent()
 
         val result = VoiceE2eLogVerifier.verifyTextTurnSequence(log)
-        assertTrue(result.failures.toString(), result.passed)
-    }
-
-    @Test
-    fun verifyTextTurnSequence_failsWhenAudioMissingBeforeFinalDone() {
-        val log = """
-            I VoiceAssistant: [Debug] Forwarding text to session: Go to the items list
-            D VoiceAssistant: [Session] → conversation.item.create (text: Go to the items list)
-            D VoiceAssistant: [Session] → response.create (after text message)
-            I VoiceAssistant: [Debug] Injected text command: Go to the items list
-            D VoiceAssistant: [Session] ← response.created | response_id=abc
-            D VoiceAssistant: [Session] ← response.done | response_id=abc
-        """.trimIndent()
-
-        val result = VoiceE2eLogVerifier.verifyTextTurnSequence(log)
         assertFalse(result.passed)
+        assertTrue(result.failures.any { it.contains("response.done between") })
     }
 
     @Test

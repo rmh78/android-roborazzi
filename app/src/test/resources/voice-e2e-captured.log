@@ -1,107 +1,75 @@
 --------- beginning of main
-07-03 23:12:43.397 12613 12613 I VoiceAssistant: [UI] Microphone permission: true
-07-03 23:12:49.494 12613 12613 I VoiceAssistant: [UI] Connect requested
-07-03 23:12:49.526 12613 12613 I VoiceAssistant: [Session] Connecting to wss://api.x.ai/v1/realtime?model=grok-4-voice
-07-03 23:12:51.301 12613 12672 I VoiceAssistant: [Session] WebSocket open (HTTP 101)
-07-03 23:12:51.303 12613 12672 I VoiceAssistant: [UI] Status → Waiting for conversation…
-07-03 23:12:51.308 12613 12672 D VoiceAssistant: [Session] ← session.created
-07-03 23:12:51.308 12613 12672 D VoiceAssistant: [Session] ← conversation.created
-07-03 23:12:51.308 12613 12672 I VoiceAssistant: [UI] Status → Configuring session…
-07-03 23:12:51.308 12613 12672 D VoiceAssistant: [Session] → session.update
-07-03 23:12:51.316 12613 12672 D VoiceAssistant: [Session] ← ping | timestamp=1783113171448
-07-03 23:12:51.316 12613 12672 D VoiceAssistant: [Session] → pong (timestamp=1783113171448)
-07-03 23:12:51.539 12613 12672 D VoiceAssistant: [Session] ← session.updated | voice=human_Eve
-07-03 23:12:51.540 12613 12672 I VoiceAssistant: [Session] Session configured — starting audio capture
-07-03 23:12:51.540 12613 12672 I VoiceAssistant: [UI] Session ready
-07-03 23:12:51.540 12613 12672 I VoiceAssistant: [UI] Status → Ready…
-07-03 23:12:51.955 12613 12672 I VoiceAssistant: [Mic] Capture started (rate=24000Hz, chunk=100ms, encoding=PCM_FLOAT)
-07-03 23:12:52.007 12613 12672 I VoiceAssistant: [UI] Status → Listening
-07-03 23:12:52.007 12613 12672 I VoiceAssistant: [Session] Mic streaming active (100ms PCM16 chunks)
-07-03 23:12:52.259 12613 12698 D VoiceAssistant: [Session] Streaming mic audio (chunks_sent=1)
-07-03 23:12:52.276 12613 12698 D VoiceAssistant: [Mic] level=0.71 chunks_sent=1
-07-03 23:12:52.683 12613 12672 D VoiceAssistant: [Session] ← input_audio_buffer.speech_started | item_id=af059c77-2a09-4e09-906b-76dc3c4c3016
-07-03 23:12:52.688 12613 12672 I VoiceAssistant: [UI] User speech started
-07-03 23:12:52.688 12613 12672 I VoiceAssistant: [UI] Status → You are speaking
-07-03 23:12:53.077 12613 12672 D VoiceAssistant: [Session] ← input_audio_buffer.speech_stopped | item_id=af059c77-2a09-4e09-906b-76dc3c4c3016
-07-03 23:12:53.077 12613 12672 I VoiceAssistant: [UI] User speech stopped
-07-03 23:12:53.077 12613 12672 I VoiceAssistant: [UI] Status → Processing…
-07-03 23:12:53.079 12613 12672 D VoiceAssistant: [Session] ← input_audio_buffer.committed | item_id=af059c77-2a09-4e09-906b-76dc3c4c3016
-07-03 23:12:53.079 12613 12672 I VoiceAssistant: [Session] Audio committed — waiting for response
-07-03 23:12:53.079 12613 12672 D VoiceAssistant: [Session] Response watchdog started (20000ms)
-07-03 23:12:53.100 12613 12698 D VoiceAssistant: [Mic] level=0.71 chunks_sent=10
-07-03 23:12:53.183 12613 12613 I VoiceAssistant: [Debug] Forwarding text to session: Go to the items list
-07-03 23:12:53.183 12613 12613 D VoiceAssistant: [Session] Response watchdog cleared
-07-03 23:12:53.184 12613 12613 I VoiceAssistant: [Mic] Capture stopped
-07-03 23:12:53.214 12613 12613 D VoiceAssistant: [Session] → input_audio_buffer.clear (before text inject)
-07-03 23:12:53.214 12613 12613 D VoiceAssistant: [Session] → conversation.item.create (text: Go to the items list)
-07-03 23:12:53.214 12613 12613 D VoiceAssistant: [Session] → response.create (after text message)
-07-03 23:12:53.214 12613 12613 D VoiceAssistant: [Session] Response watchdog started (20000ms)
-07-03 23:12:53.214 12613 12613 I VoiceAssistant: [Debug] Injected text command: Go to the items list
-07-03 23:12:53.389 12613 12672 D VoiceAssistant: [Session] ← input_audio_buffer.cleared
-07-03 23:12:53.389 12613 12672 D VoiceAssistant: [Session] Unhandled event type: input_audio_buffer.cleared
-07-03 23:12:53.389 12613 12672 D VoiceAssistant: [Session] ← conversation.item.created
-07-03 23:12:53.389 12613 12672 D VoiceAssistant: [Session] Unhandled event type: conversation.item.created
-07-03 23:12:53.389 12613 12672 D VoiceAssistant: [Session] ← response.created | response_id=87ef5c2c-7cd7-4fb9-a202-62d5203aadf7
-07-03 23:12:53.389 12613 12672 D VoiceAssistant: [Session] Response watchdog cleared
-07-03 23:12:53.390 12613 12672 I VoiceAssistant: [Session] Response started (id=87ef5c2c-7cd7-4fb9-a202-62d5203aadf7)
-07-03 23:12:53.391 12613 12672 I VoiceAssistant: [UI] Status → Grok is responding…
-07-03 23:12:53.678 12613 12672 D VoiceAssistant: [Session] ← response.output_item.added
-07-03 23:12:53.678 12613 12672 D VoiceAssistant: [Session] Unhandled event type: response.output_item.added
-07-03 23:12:53.678 12613 12672 D VoiceAssistant: [Session] ← conversation.item.created
-07-03 23:12:53.678 12613 12672 D VoiceAssistant: [Session] Unhandled event type: conversation.item.created
-07-03 23:12:53.678 12613 12672 D VoiceAssistant: [Session] ← response.function_call_arguments.delta
-07-03 23:12:53.678 12613 12672 D VoiceAssistant: [Session] Unhandled event type: response.function_call_arguments.delta
-07-03 23:12:53.678 12613 12672 D VoiceAssistant: [Session] ← response.function_call_arguments.done | tool=navigate_to_screen call_id=call-aa524610-8300-4491-b3fc-77e23a96b188-0 args={"destination":"items"}
-07-03 23:12:53.679 12613 12672 I VoiceAssistant: [UI] Function call: navigate_to_screen (call_id=call-aa524610-8300-4491-b3fc-77e23a96b188-0, args={"destination":"items"})
-07-03 23:12:53.680 12613 12672 D VoiceAssistant: [Session] ← response.output_item.done
-07-03 23:12:53.680 12613 12672 D VoiceAssistant: [Session] Unhandled event type: response.output_item.done
-07-03 23:12:53.681 12613 12672 D VoiceAssistant: [Session] ← response.done | response_id=87ef5c2c-7cd7-4fb9-a202-62d5203aadf7
-07-03 23:12:53.681 12613 12672 I VoiceAssistant: [Session] Response complete
-07-03 23:12:53.681 12613 12672 I VoiceAssistant: [UI] Status → Listening
-07-03 23:12:53.682 12613 12613 I VoiceAssistant: [Tool] Executing navigate_to_screen with {"destination":"items"}
-07-03 23:12:53.695 12613 12613 I VoiceAssistant: [Tool] navigate_to_screen → Navigated to items list.
-07-03 23:12:53.695 12613 12613 D VoiceAssistant: [Session] → conversation.item.create (function_call_output, call_id=call-aa524610-8300-4491-b3fc-77e23a96b188-0)
-07-03 23:12:53.695 12613 12613 D VoiceAssistant: [Session] Tool output: Navigated to items list.
-07-03 23:12:53.695 12613 12613 D VoiceAssistant: [Session] → response.create (after tool result)
-07-03 23:12:53.696 12613 12613 D VoiceAssistant: [Session] Response watchdog started (20000ms)
-07-03 23:12:53.720 12613 12672 I VoiceAssistant: [Mic] Capture started (rate=24000Hz, chunk=100ms, encoding=PCM_FLOAT)
-07-03 23:12:53.723 12613 12672 I VoiceAssistant: [UI] Status → Listening
-07-03 23:12:53.724 12613 12672 I VoiceAssistant: [Session] Mic streaming active (100ms PCM16 chunks)
-07-03 23:12:53.919 12613 12672 D VoiceAssistant: [Session] ← conversation.item.created
-07-03 23:12:53.919 12613 12672 D VoiceAssistant: [Session] Unhandled event type: conversation.item.created
-07-03 23:12:53.919 12613 12672 D VoiceAssistant: [Session] ← response.created | response_id=0a6299eb-797f-45c9-8cdf-090dd8f17bf2
-07-03 23:12:53.919 12613 12672 D VoiceAssistant: [Session] Response watchdog cleared
-07-03 23:12:53.919 12613 12672 I VoiceAssistant: [Session] Response started (id=0a6299eb-797f-45c9-8cdf-090dd8f17bf2)
-07-03 23:12:53.919 12613 12672 I VoiceAssistant: [UI] Status → Grok is responding…
-07-03 23:12:53.922 12613 12698 D VoiceAssistant: [Mic] level=0.71 chunks_sent=1
-07-03 23:12:54.199 12613 12672 D VoiceAssistant: [Session] ← response.output_item.added
-07-03 23:12:54.199 12613 12672 D VoiceAssistant: [Session] Unhandled event type: response.output_item.added
-07-03 23:12:54.199 12613 12672 D VoiceAssistant: [Session] ← conversation.item.created
-07-03 23:12:54.199 12613 12672 D VoiceAssistant: [Session] Unhandled event type: conversation.item.created
-07-03 23:12:54.199 12613 12672 D VoiceAssistant: [Session] ← response.content_part.added
-07-03 23:12:54.199 12613 12672 D VoiceAssistant: [Session] Unhandled event type: response.content_part.added
-07-03 23:12:54.737 12613 12672 D VoiceAssistant: [Session] ← response.audio.delta | bytes=35840
-07-03 23:12:54.739 12613 12672 I VoiceAssistant: [Playback] AudioTrack created (24000Hz mono PCM)
-07-03 23:12:54.775 12613 12698 D VoiceAssistant: [Mic] level=0.71 chunks_sent=10
-07-03 23:12:54.978 12613 12672 D VoiceAssistant: [Playback] Playing assistant audio (chunks=1, bytes=26880)
-07-03 23:12:54.978 12613 12672 D VoiceAssistant: [Session] ← response.audio_transcript.delta | delta=You're now on the items list screen
-07-03 23:12:54.978 12613 12672 D VoiceAssistant: [UI] Assistant transcript delta: You're now on the items list screen
-07-03 23:12:55.000 12613 12672 D VoiceAssistant: [Session] ← response.audio.delta | bytes=35840
-07-03 23:12:55.549 12613 12672 D VoiceAssistant: [Session] ← response.audio_transcript.delta | delta=.
-07-03 23:12:55.550 12613 12672 D VoiceAssistant: [UI] Assistant transcript delta: .
-07-03 23:12:55.552 12613 12672 D VoiceAssistant: [Session] ← response.audio.delta | bytes=37120
-07-03 23:12:55.831 12613 12698 D VoiceAssistant: [Mic] level=0.71 chunks_sent=20
-07-03 23:12:56.075 12613 12672 D VoiceAssistant: [Session] ← response.audio.delta | bytes=31360
-07-03 23:12:56.655 12613 12672 D VoiceAssistant: [Session] ← response.audio.delta | bytes=2560
-07-03 23:12:56.656 12613 12672 D VoiceAssistant: [Session] ← response.audio_transcript.done | transcript=You're now on the items list screen.
-07-03 23:12:56.659 12613 12672 I VoiceAssistant: [UI] Assistant transcript (final): You're now on the items list screen.
-07-03 23:12:56.662 12613 12672 D VoiceAssistant: [Session] ← response.content_part.done
-07-03 23:12:56.662 12613 12672 D VoiceAssistant: [Session] Unhandled event type: response.content_part.done
-07-03 23:12:56.663 12613 12672 D VoiceAssistant: [Session] ← response.audio.done
-07-03 23:12:56.663 12613 12672 D VoiceAssistant: [Session] Unhandled event type: response.audio.done
-07-03 23:12:56.663 12613 12672 D VoiceAssistant: [Session] ← response.output_item.done
-07-03 23:12:56.663 12613 12672 D VoiceAssistant: [Session] Unhandled event type: response.output_item.done
-07-03 23:12:56.663 12613 12672 D VoiceAssistant: [Session] ← response.done | response_id=0a6299eb-797f-45c9-8cdf-090dd8f17bf2
-07-03 23:12:56.664 12613 12672 I VoiceAssistant: [Session] Response complete
-07-03 23:12:56.664 12613 12672 I VoiceAssistant: [UI] Status → Listening
-07-03 23:12:56.828 12613 12698 D VoiceAssistant: [Mic] level=0.71 chunks_sent=30
+07-03 23:24:10.114 13286 13286 I VoiceAssistant: [UI] Microphone permission: true
+07-03 23:24:15.827 13286 13286 I VoiceAssistant: [UI] Connect requested
+07-03 23:24:15.871 13286 13286 I VoiceAssistant: [Session] Connecting to wss://api.x.ai/v1/realtime?model=grok-4-voice
+07-03 23:24:18.411 13286 13345 I VoiceAssistant: [Session] WebSocket open (HTTP 101)
+07-03 23:24:18.412 13286 13345 I VoiceAssistant: [UI] Status → Waiting for conversation…
+07-03 23:24:18.416 13286 13345 D VoiceAssistant: [Session] ← session.created
+07-03 23:24:18.416 13286 13345 D VoiceAssistant: [Session] ← conversation.created
+07-03 23:24:18.416 13286 13345 I VoiceAssistant: [UI] Status → Configuring session…
+07-03 23:24:18.418 13286 13345 D VoiceAssistant: [Session] → session.update
+07-03 23:24:18.423 13286 13345 D VoiceAssistant: [Session] ← ping | timestamp=1783113858576
+07-03 23:24:18.423 13286 13345 D VoiceAssistant: [Session] → pong (timestamp=1783113858576)
+07-03 23:24:18.681 13286 13345 D VoiceAssistant: [Session] ← session.updated | voice=human_Eve
+07-03 23:24:18.682 13286 13345 I VoiceAssistant: [Session] Session configured — starting audio capture
+07-03 23:24:18.682 13286 13345 I VoiceAssistant: [UI] Session ready
+07-03 23:24:18.684 13286 13345 I VoiceAssistant: [UI] Status → Ready…
+07-03 23:24:18.952 13286 13345 I VoiceAssistant: [Mic] Capture started (rate=24000Hz, chunk=100ms, encoding=PCM_FLOAT)
+07-03 23:24:18.957 13286 13345 I VoiceAssistant: [UI] Status → Listening
+07-03 23:24:18.957 13286 13345 I VoiceAssistant: [Session] Mic streaming active (100ms PCM16 chunks)
+07-03 23:24:19.269 13286 13375 D VoiceAssistant: [Session] Streaming mic audio (chunks_sent=1)
+07-03 23:24:19.271 13286 13375 D VoiceAssistant: [Mic] level=0.71 chunks_sent=1
+07-03 23:24:19.715 13286 13345 D VoiceAssistant: [Session] ← input_audio_buffer.speech_started | item_id=08eca22a-1e0e-4fe7-87a3-3c7e1e0dc2da
+07-03 23:24:19.715 13286 13345 I VoiceAssistant: [UI] User speech started
+07-03 23:24:19.715 13286 13345 I VoiceAssistant: [UI] Status → You are speaking
+07-03 23:24:20.206 13286 13286 I VoiceAssistant: [Debug] Forwarding text to session: Say a brief hello
+07-03 23:24:20.218 13286 13375 D VoiceAssistant: [Mic] level=0.71 chunks_sent=10
+07-03 23:24:20.219 13286 13286 I VoiceAssistant: [Mic] Capture stopped
+07-03 23:24:20.235 13286 13345 D VoiceAssistant: [Session] ← input_audio_buffer.speech_stopped | item_id=08eca22a-1e0e-4fe7-87a3-3c7e1e0dc2da
+07-03 23:24:20.235 13286 13345 I VoiceAssistant: [UI] User speech stopped
+07-03 23:24:20.236 13286 13345 I VoiceAssistant: [UI] Status → Processing…
+07-03 23:24:20.236 13286 13345 D VoiceAssistant: [Session] ← input_audio_buffer.committed | item_id=08eca22a-1e0e-4fe7-87a3-3c7e1e0dc2da
+07-03 23:24:20.236 13286 13345 I VoiceAssistant: [Session] Audio committed — waiting for response
+07-03 23:24:20.236 13286 13345 D VoiceAssistant: [Session] Response watchdog started (20000ms)
+07-03 23:24:20.305 13286 13286 D VoiceAssistant: [Session] → input_audio_buffer.clear (before text inject)
+07-03 23:24:20.307 13286 13286 D VoiceAssistant: [Session] → conversation.item.create (text: Say a brief hello)
+07-03 23:24:20.307 13286 13286 D VoiceAssistant: [Session] → response.create (after text message)
+07-03 23:24:20.307 13286 13286 D VoiceAssistant: [Session] Response watchdog started (20000ms)
+07-03 23:24:20.308 13286 13286 I VoiceAssistant: [Debug] Injected text command: Say a brief hello
+07-03 23:24:20.479 13286 13345 D VoiceAssistant: [Session] ← input_audio_buffer.cleared
+07-03 23:24:20.479 13286 13345 D VoiceAssistant: [Session] Unhandled event type: input_audio_buffer.cleared
+07-03 23:24:20.479 13286 13345 D VoiceAssistant: [Session] ← conversation.item.created
+07-03 23:24:20.479 13286 13345 D VoiceAssistant: [Session] Unhandled event type: conversation.item.created
+07-03 23:24:20.509 13286 13345 D VoiceAssistant: [Session] ← response.created | response_id=dab4a4dc-b3ab-4da2-9553-6facbeee6821
+07-03 23:24:20.509 13286 13345 D VoiceAssistant: [Session] Response watchdog cleared
+07-03 23:24:20.509 13286 13345 I VoiceAssistant: [Session] Response started (id=dab4a4dc-b3ab-4da2-9553-6facbeee6821)
+07-03 23:24:20.509 13286 13345 I VoiceAssistant: [UI] Status → Grok is responding…
+07-03 23:24:20.782 13286 13345 D VoiceAssistant: [Session] ← response.output_item.added
+07-03 23:24:20.782 13286 13345 D VoiceAssistant: [Session] Unhandled event type: response.output_item.added
+07-03 23:24:20.782 13286 13345 D VoiceAssistant: [Session] ← conversation.item.created
+07-03 23:24:20.782 13286 13345 D VoiceAssistant: [Session] Unhandled event type: conversation.item.created
+07-03 23:24:20.782 13286 13345 D VoiceAssistant: [Session] ← response.content_part.added
+07-03 23:24:20.782 13286 13345 D VoiceAssistant: [Session] Unhandled event type: response.content_part.added
+07-03 23:24:21.347 13286 13345 D VoiceAssistant: [Session] ← response.audio.delta | bytes=35840
+07-03 23:24:21.352 13286 13345 I VoiceAssistant: [Playback] AudioTrack created (24000Hz mono PCM)
+07-03 23:24:21.588 13286 13345 D VoiceAssistant: [Playback] Playing assistant audio (chunks=1, bytes=26880)
+07-03 23:24:21.589 13286 13345 D VoiceAssistant: [Session] ← response.audio_transcript.delta | delta=Hello! How can I help?
+07-03 23:24:21.589 13286 13345 D VoiceAssistant: [UI] Assistant transcript delta: Hello! How can I help?
+07-03 23:24:21.592 13286 13345 D VoiceAssistant: [Session] ← response.audio.delta | bytes=35840
+07-03 23:24:22.134 13286 13345 D VoiceAssistant: [Session] ← response.audio.delta | bytes=31360
+07-03 23:24:22.679 13286 13345 D VoiceAssistant: [Session] ← response.audio.delta | bytes=2560
+07-03 23:24:22.679 13286 13345 D VoiceAssistant: [Session] ← response.audio_transcript.done | transcript=Hello! How can I help?
+07-03 23:24:22.679 13286 13345 I VoiceAssistant: [UI] Assistant transcript (final): Hello! How can I help?
+07-03 23:24:22.680 13286 13345 D VoiceAssistant: [Session] ← response.content_part.done
+07-03 23:24:22.680 13286 13345 D VoiceAssistant: [Session] Unhandled event type: response.content_part.done
+07-03 23:24:22.681 13286 13345 D VoiceAssistant: [Session] ← response.audio.done
+07-03 23:24:22.681 13286 13345 D VoiceAssistant: [Session] Unhandled event type: response.audio.done
+07-03 23:24:22.681 13286 13345 D VoiceAssistant: [Session] ← response.output_item.done
+07-03 23:24:22.681 13286 13345 D VoiceAssistant: [Session] Unhandled event type: response.output_item.done
+07-03 23:24:22.681 13286 13345 D VoiceAssistant: [Session] ← response.done | response_id=dab4a4dc-b3ab-4da2-9553-6facbeee6821
+07-03 23:24:22.681 13286 13345 I VoiceAssistant: [Session] Response complete (had_audio=true)
+07-03 23:24:22.681 13286 13345 I VoiceAssistant: [UI] Status → Listening
+07-03 23:24:22.720 13286 13345 I VoiceAssistant: [Mic] Capture started (rate=24000Hz, chunk=100ms, encoding=PCM_FLOAT)
+07-03 23:24:22.722 13286 13345 I VoiceAssistant: [UI] Status → Listening
+07-03 23:24:22.722 13286 13345 I VoiceAssistant: [Session] Mic streaming active (100ms PCM16 chunks)
+07-03 23:24:22.957 13286 13375 D VoiceAssistant: [Mic] level=0.71 chunks_sent=1

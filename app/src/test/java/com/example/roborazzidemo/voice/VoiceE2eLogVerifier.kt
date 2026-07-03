@@ -2,7 +2,9 @@ package com.example.roborazzidemo.voice
 
 /**
  * Verifies captured VoiceAssistant logcat for E2E acceptance criteria.
- * Used by [VoiceE2eLogVerifierTest] against a real captured log fixture.
+ * Criterion 3 requires a direct chain after text inject:
+ * text create → response.create → response.created → audio.delta → response.done
+ * with no intervening response.done or tool call between created and first audio.
  */
 object VoiceE2eLogVerifier {
     data class Result(val passed: Boolean, val failures: List<String>)
@@ -32,51 +34,69 @@ object VoiceE2eLogVerifier {
             log.indexOf(marker).takeIf { it >= 0 }
         }.minOrNull()
             ?: return Result(false, listOf("text turn: missing inject marker"))
+
         val slice = log.substring(sliceStart)
-
-        val ordered = listOf(
-            Regex("""conversation\.item\.create \(text:"""),
-            Regex("""response\.create \(after text message\)"""),
-            Regex("""← response\.created"""),
-            Regex("""← response\.(output_)?audio\.delta"""),
-        )
-
-        var lastPos = -1
         val failures = mutableListOf<String>()
-        for (pattern in ordered) {
-            val match = pattern.find(slice)
-            if (match == null) {
-                failures += "text turn: missing ordered event matching ${pattern.pattern}"
-                continue
+
+        val textCreate = Regex("""conversation\.item\.create \(text:""").find(slice)
+        if (textCreate == null) failures += "text turn: missing conversation.item.create (text:)"
+
+        val responseCreate = Regex("""response\.create \(after text message\)""").find(slice)
+        if (responseCreate == null) failures += "text turn: missing response.create (after text message)"
+
+        val created = if (responseCreate != null) {
+            Regex("""← response\.created""").find(slice, responseCreate.range.last + 1)
+        } else {
+            Regex("""← response\.created""").find(slice)
+        }
+        if (created == null) failures += "text turn: missing response.created after text response.create"
+
+        if (textCreate != null && responseCreate != null &&
+            textCreate.range.first >= responseCreate.range.first
+        ) {
+            failures += "text turn: conversation.item.create not before response.create"
+        }
+        if (responseCreate != null && created != null &&
+            responseCreate.range.first >= created.range.first
+        ) {
+            failures += "text turn: response.create not before response.created"
+        }
+
+        val createdPos = created?.range?.first
+        val audio = if (createdPos != null) {
+            Regex("""← response\.(output_)?audio\.delta""").find(slice, createdPos)
+        } else {
+            null
+        }
+        if (createdPos != null && audio == null) {
+            failures += "text turn: missing audio.delta after response.created"
+        }
+
+        val audioPos = audio?.range?.first
+        if (createdPos != null && audioPos != null) {
+            val between = slice.substring(createdPos, audioPos)
+            if (between.contains("← response.done")) {
+                failures += "text turn: response.done between response.created and first audio.delta"
             }
-            if (match.range.first <= lastPos) {
-                failures += "text turn: out-of-order event ${pattern.pattern}"
+            if (between.contains("function_call_arguments.done")) {
+                failures += "text turn: tool call between response.created and first audio.delta"
             }
-            lastPos = match.range.first
         }
 
-        val audioPos = Regex("""← response\.(output_)?audio\.delta""")
-            .findAll(slice)
-            .lastOrNull()
-            ?.range
-            ?.first
-        val doneAfterAudio = Regex("""← response\.done""")
-            .findAll(slice)
-            .map { it.range.first }
-            .any { pos -> audioPos != null && pos > audioPos }
-
-        if (audioPos == null) {
-            failures += "text turn: no audio delta in inject slice"
-        } else if (!doneAfterAudio) {
-            failures += "text turn: no response.done after audio delta"
+        val done = if (audioPos != null) {
+            Regex("""← response\.done""").find(slice, audioPos)
+        } else {
+            null
+        }
+        if (audioPos != null && done == null) {
+            failures += "text turn: missing response.done after first audio.delta"
+        }
+        if (audioPos != null && done != null && audioPos >= done.range.first) {
+            failures += "text turn: response.done not after first audio.delta"
         }
 
-        if (slice.contains("[Session] API error")) {
-            failures += "text turn: API error in inject slice"
-        }
-        if (slice.contains("Response timeout")) {
-            failures += "text turn: Response timeout in inject slice"
-        }
+        if (slice.contains("[Session] API error")) failures += "text turn: API error in inject slice"
+        if (slice.contains("Response timeout")) failures += "text turn: Response timeout in inject slice"
 
         return Result(failures.isEmpty(), failures)
     }
