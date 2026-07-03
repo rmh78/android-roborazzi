@@ -47,4 +47,15 @@ abstract class RoborazziComposeTest {
             roborazziOptions = roborazziOptions,
         )
     }
+
+    protected fun captureThemedRoboImage(
+        name: String,
+        darkTheme: Boolean = false,
+        content: @Composable () -> Unit,
+    ) {
+        val fileName = if (name.endsWith(".webp")) name else "$name.webp"
+        captureRoboImage(fileName, roborazziOptions = roborazziOptions) {
+            RoborazziDemoTheme(darkTheme = darkTheme, content = content)
+        }
+    }
 }
