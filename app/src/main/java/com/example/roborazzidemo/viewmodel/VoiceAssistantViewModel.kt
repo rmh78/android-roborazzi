@@ -27,6 +27,7 @@ enum class TranscriptRole {
 
 data class VoiceUiState(
     val isConnected: Boolean = false,
+    val isSpeakActive: Boolean = false,
     val status: String = "Disconnected",
     val audioLevel: Float = 0f,
     val liveUserText: String = "",
@@ -92,6 +93,12 @@ class VoiceAssistantViewModel(
         }
     }
 
+    fun setSpeakActive(active: Boolean) {
+        VoiceLog.ui("Speak ${if (active) "on" else "off"}")
+        _uiState.update { it.copy(isSpeakActive = active) }
+        session?.setSpeakActive(active)
+    }
+
     fun disconnect() {
         VoiceLog.ui("Disconnect requested")
         VoiceDebugBridge.sendTextCommand = null
@@ -101,6 +108,7 @@ class VoiceAssistantViewModel(
         _uiState.update {
             it.copy(
                 isConnected = false,
+                isSpeakActive = false,
                 status = "Disconnected",
                 audioLevel = 0f,
                 liveUserText = "",
@@ -112,7 +120,19 @@ class VoiceAssistantViewModel(
     override fun onSessionReady() {
         VoiceLog.ui("Session ready")
         _uiState.update {
-            it.copy(isConnected = true, status = "Listening", errorMessage = null)
+            it.copy(
+                isConnected = true,
+                isSpeakActive = false,
+                status = "Connected — tap Speak",
+                errorMessage = null,
+            )
+        }
+    }
+
+    override fun onSpeakTurnEnded() {
+        VoiceLog.ui("Speak turn ended")
+        _uiState.update {
+            it.copy(isSpeakActive = false, status = "Connected — tap Speak")
         }
     }
 
@@ -192,6 +212,7 @@ class VoiceAssistantViewModel(
         _uiState.update {
             it.copy(
                 isConnected = false,
+                isSpeakActive = false,
                 status = "Disconnected",
                 audioLevel = 0f,
             )

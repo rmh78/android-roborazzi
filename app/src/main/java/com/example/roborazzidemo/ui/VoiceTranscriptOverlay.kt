@@ -32,6 +32,7 @@ import com.example.roborazzidemo.viewmodel.VoiceUiState
 fun VoiceTranscriptOverlay(
     state: VoiceUiState,
     onConnectChange: (Boolean) -> Unit,
+    onSpeakChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -85,6 +86,19 @@ fun VoiceTranscriptOverlay(
             }
 
             if (state.isConnected) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Speak", style = MaterialTheme.typography.labelMedium)
+                    Switch(
+                        checked = state.isSpeakActive,
+                        onCheckedChange = onSpeakChange,
+                        modifier = Modifier.testTag("voice_speak_switch"),
+                    )
+                }
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Mic level", style = MaterialTheme.typography.labelSmall)
                     Box(

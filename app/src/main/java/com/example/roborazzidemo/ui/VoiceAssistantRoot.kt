@@ -68,6 +68,13 @@ fun VoiceAssistantRoot(
                         viewModel.disconnect()
                     }
                 },
+                onSpeakChange = { speak ->
+                    if (!hasRecordAudioPermission) {
+                        onRequestRecordAudioPermission()
+                        return@VoiceTranscriptOverlay
+                    }
+                    viewModel.setSpeakActive(speak)
+                },
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }

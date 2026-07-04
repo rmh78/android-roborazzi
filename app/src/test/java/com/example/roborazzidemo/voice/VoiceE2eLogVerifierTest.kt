@@ -12,8 +12,7 @@ class VoiceE2eLogVerifierTest {
             D VoiceAssistant: [Session] ← conversation.created
             D VoiceAssistant: [Session] → session.update
             D VoiceAssistant: [Session] ← session.updated
-            I VoiceAssistant: [Session] Session configured — starting audio capture
-            I VoiceAssistant: [Session] Mic streaming active (100ms PCM16 chunks)
+            I VoiceAssistant: [Session] Session configured — tap Speak to use microphone
         """.trimIndent()
 
         val result = VoiceE2eLogVerifier.verifyConnectPhase(log)

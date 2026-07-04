@@ -39,7 +39,7 @@ class PcmAudioCapture {
         }
 
         val record = AudioRecord.Builder()
-            .setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+            .setAudioSource(MediaRecorder.AudioSource.MIC)
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setSampleRate(VoiceConstants.SAMPLE_RATE_HZ)

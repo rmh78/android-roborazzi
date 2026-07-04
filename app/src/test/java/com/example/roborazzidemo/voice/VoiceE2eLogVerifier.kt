@@ -15,7 +15,6 @@ object VoiceE2eLogVerifier {
         "session.update",
         "session.updated",
         "Session configured",
-        "Mic streaming active",
     )
 
     fun verifyConnectPhase(log: String): Result {

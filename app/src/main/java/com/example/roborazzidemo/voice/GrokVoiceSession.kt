@@ -24,6 +24,7 @@ interface VoiceSessionListener {
     fun onFunctionCall(name: String, arguments: JSONObject, callId: String)
     fun onError(message: String)
     fun onDisconnected()
+    fun onSpeakTurnEnded()
 }
 
 class GrokVoiceSession(
@@ -43,6 +44,7 @@ class GrokVoiceSession(
     private var activeResponseHadAudio = false
     private var pendingDebugText: String? = null
     private var awaitingToolsRestore = false
+    private var speakActive = false
 
     val audioLevel = audioCapture.audioLevel
 
@@ -61,6 +63,7 @@ class GrokVoiceSession(
         audioChunksSent = 0
         pendingDebugText = null
         awaitingToolsRestore = false
+        speakActive = false
 
         VoiceLog.i("Session", "Connecting to ${VoiceConstants.REALTIME_URL}")
 
@@ -93,6 +96,17 @@ class GrokVoiceSession(
         })
     }
 
+    fun setSpeakActive(active: Boolean) {
+        if (speakActive == active) return
+        speakActive = active
+        if (!sessionConfigured) return
+        if (active) {
+            startAudioCapture()
+        } else {
+            stopListening(notifyStatus = true)
+        }
+    }
+
     fun disconnect() {
         if (webSocket == null) return
         VoiceLog.i("Session", "Disconnect requested")
@@ -111,6 +125,7 @@ class GrokVoiceSession(
         activeResponseId = null
         pendingDebugText = null
         awaitingToolsRestore = false
+        speakActive = false
         VoiceLog.d("Session", "Connection cleaned up (audio_chunks_sent=$audioChunksSent)")
         if (notifyListener) {
             listener.onDisconnected()
@@ -242,10 +257,9 @@ class GrokVoiceSession(
                 when {
                     !sessionConfigured -> {
                         sessionConfigured = true
-                        VoiceLog.i("Session", "Session configured — starting audio capture")
+                        VoiceLog.i("Session", "Session configured — tap Speak to use microphone")
                         listener.onSessionReady()
-                        listener.onStatusChanged("Ready…")
-                        startAudioCapture()
+                        listener.onStatusChanged("Connected — tap Speak")
                     }
                     pendingText != null -> {
                         pendingDebugText = null
@@ -253,7 +267,9 @@ class GrokVoiceSession(
                     }
                     awaitingToolsRestore -> {
                         awaitingToolsRestore = false
-                        startAudioCapture()
+                        if (speakActive) {
+                            startAudioCapture()
+                        }
                     }
                 }
             }
@@ -268,6 +284,11 @@ class GrokVoiceSession(
             }
             "input_audio_buffer.committed" -> {
                 VoiceLog.i("Session", "Audio committed — waiting for response")
+                if (speakActive) {
+                    speakActive = false
+                    stopListening(notifyStatus = false)
+                    listener.onSpeakTurnEnded()
+                }
                 scheduleResponseWatchdog(socket)
             }
             "conversation.item.input_audio_transcription.updated" -> {
@@ -340,6 +361,16 @@ class GrokVoiceSession(
                 listener.onError(message)
             }
             else -> VoiceLog.d("Session", "Unhandled event type: $type")
+        }
+    }
+
+    private fun stopListening(notifyStatus: Boolean) {
+        if (!audioCapture.isCapturing()) return
+        audioCapture.stop()
+        micGate.onCaptureStopped()
+        VoiceLog.i("Session", "Mic streaming stopped")
+        if (notifyStatus) {
+            listener.onStatusChanged("Connected — tap Speak")
         }
     }
 
