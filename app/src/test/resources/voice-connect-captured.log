@@ -1,24 +1,19 @@
 --------- beginning of main
-07-03 23:24:10.114 13286 13286 I VoiceAssistant: [UI] Microphone permission: true
-07-03 23:24:15.827 13286 13286 I VoiceAssistant: [UI] Connect requested
-07-03 23:24:15.871 13286 13286 I VoiceAssistant: [Session] Connecting to wss://api.x.ai/v1/realtime?model=grok-4-voice
-07-03 23:24:18.411 13286 13345 I VoiceAssistant: [Session] WebSocket open (HTTP 101)
-07-03 23:24:18.412 13286 13345 I VoiceAssistant: [UI] Status → Waiting for conversation…
-07-03 23:24:18.416 13286 13345 D VoiceAssistant: [Session] ← session.created
-07-03 23:24:18.416 13286 13345 D VoiceAssistant: [Session] ← conversation.created
-07-03 23:24:18.416 13286 13345 I VoiceAssistant: [UI] Status → Configuring session…
-07-03 23:24:18.418 13286 13345 D VoiceAssistant: [Session] → session.update
-07-03 23:24:18.423 13286 13345 D VoiceAssistant: [Session] ← ping | timestamp=1783113858576
-07-03 23:24:18.423 13286 13345 D VoiceAssistant: [Session] → pong (timestamp=1783113858576)
-07-03 23:24:18.681 13286 13345 D VoiceAssistant: [Session] ← session.updated | voice=human_Eve
-07-03 23:24:18.682 13286 13345 I VoiceAssistant: [Session] Session configured — starting audio capture
-07-03 23:24:18.682 13286 13345 I VoiceAssistant: [UI] Session ready
-07-03 23:24:18.684 13286 13345 I VoiceAssistant: [UI] Status → Ready…
-07-03 23:24:18.952 13286 13345 I VoiceAssistant: [Mic] Capture started (rate=24000Hz, chunk=100ms, encoding=PCM_FLOAT)
-07-03 23:24:18.957 13286 13345 I VoiceAssistant: [UI] Status → Listening
-07-03 23:24:18.957 13286 13345 I VoiceAssistant: [Session] Mic streaming active (100ms PCM16 chunks)
-07-03 23:24:19.269 13286 13375 D VoiceAssistant: [Session] Streaming mic audio (chunks_sent=1)
-07-03 23:24:19.271 13286 13375 D VoiceAssistant: [Mic] level=0.71 chunks_sent=1
-07-03 23:24:19.715 13286 13345 D VoiceAssistant: [Session] ← input_audio_buffer.speech_started | item_id=08eca22a-1e0e-4fe7-87a3-3c7e1e0dc2da
-07-03 23:24:19.715 13286 13345 I VoiceAssistant: [UI] User speech started
-07-03 23:24:19.715 13286 13345 I VoiceAssistant: [UI] Status → You are speaking
+07-04 20:28:24.506  5734  5734 I VoiceAssistant: [UI] Microphone permission: true
+07-04 20:28:26.529  5734  5734 I VoiceAssistant: [UI] Connect requested
+07-04 20:28:26.597  5734  5734 I VoiceAssistant: [Session] Connecting to wss://api.x.ai/v1/realtime?model=grok-4-voice
+07-04 20:28:28.443  5734  5809 I VoiceAssistant: [Session] WebSocket open (HTTP 101)
+07-04 20:28:28.444  5734  5809 I VoiceAssistant: [UI] Status → Waiting for conversation…
+07-04 20:28:28.453  5734  5809 D VoiceAssistant: [Session] ← session.created
+07-04 20:28:28.456  5734  5809 D VoiceAssistant: [Session] ← conversation.created
+07-04 20:28:28.456  5734  5809 I VoiceAssistant: [UI] Status → Configuring session…
+07-04 20:28:28.457  5734  5809 D VoiceAssistant: [Session] → session.update
+07-04 20:28:28.464  5734  5809 D VoiceAssistant: [Session] ← ping | timestamp=1783189708566
+07-04 20:28:28.464  5734  5809 D VoiceAssistant: [Session] → pong (timestamp=1783189708566)
+07-04 20:28:29.292  5734  5809 D VoiceAssistant: [Session] ← session.updated | voice=human_Eve
+07-04 20:28:29.292  5734  5809 I VoiceAssistant: [Session] Session configured — starting audio capture
+07-04 20:28:29.292  5734  5809 I VoiceAssistant: [UI] Session ready
+07-04 20:28:29.293  5734  5809 I VoiceAssistant: [UI] Status → Ready…
+07-04 20:28:29.812  5734  5809 I VoiceAssistant: [Mic] Capture started (rate=24000Hz, chunk=100ms, encoding=PCM_FLOAT)
+07-04 20:28:29.857  5734  5809 I VoiceAssistant: [UI] Status → Listening
+07-04 20:28:29.857  5734  5809 I VoiceAssistant: [Session] Mic streaming active (100ms PCM16 chunks)

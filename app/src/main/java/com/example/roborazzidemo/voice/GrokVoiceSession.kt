@@ -33,14 +33,16 @@ class GrokVoiceSession(
 ) {
     private val audioCapture = PcmAudioCapture()
     private val audioPlayback = PcmAudioPlayback()
+    private val micGate = MicCaptureGate()
     private var webSocket: WebSocket? = null
     private var sessionConfigured = false
     private var sessionUpdateSent = false
     private var responseWatchdogJob: Job? = null
     private var activeResponseId: String? = null
     private var audioChunksSent = 0
-    private var micPausedForTextInject = false
     private var activeResponseHadAudio = false
+    private var pendingDebugText: String? = null
+    private var awaitingToolsRestore = false
 
     val audioLevel = audioCapture.audioLevel
 
@@ -57,6 +59,8 @@ class GrokVoiceSession(
         sessionUpdateSent = false
         activeResponseId = null
         audioChunksSent = 0
+        pendingDebugText = null
+        awaitingToolsRestore = false
 
         VoiceLog.i("Session", "Connecting to ${VoiceConstants.REALTIME_URL}")
 
@@ -105,6 +109,8 @@ class GrokVoiceSession(
         sessionConfigured = false
         sessionUpdateSent = false
         activeResponseId = null
+        pendingDebugText = null
+        awaitingToolsRestore = false
         VoiceLog.d("Session", "Connection cleaned up (audio_chunks_sent=$audioChunksSent)")
         if (notifyListener) {
             listener.onDisconnected()
@@ -123,37 +129,15 @@ class GrokVoiceSession(
         clearResponseWatchdog()
         if (audioCapture.isCapturing()) {
             audioCapture.stop()
-            micPausedForTextInject = true
+            micGate.pauseForTextInject()
             VoiceLog.clientEvent("input_audio_buffer.clear (before text inject)")
             socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
+        } else {
+            micGate.pauseForTextInject()
         }
-        VoiceLog.clientEvent("conversation.item.create (text: $text)")
-        socket.send(
-            JSONObject().apply {
-                put("type", "conversation.item.create")
-                put(
-                    "item",
-                    JSONObject().apply {
-                        put("type", "message")
-                        put("role", "user")
-                        put(
-                            "content",
-                            org.json.JSONArray().apply {
-                                put(
-                                    JSONObject().apply {
-                                        put("type", "input_text")
-                                        put("text", text)
-                                    },
-                                )
-                            },
-                        )
-                    },
-                )
-            }.toString(),
-        )
-        VoiceLog.clientEvent("response.create (after text message)")
-        socket.send(JSONObject().put("type", "response.create").toString())
-        scheduleResponseWatchdog(socket)
+        pendingDebugText = text
+        VoiceLog.clientEvent("session.update (direct-speech for debug inject)")
+        socket.send(VoiceSessionUpdateBuilder.directSpeechForDebugInject().toString())
     }
 
     fun sendToolResult(output: String, callId: String) {
@@ -185,7 +169,43 @@ class GrokVoiceSession(
         if (sessionUpdateSent) return
         sessionUpdateSent = true
         VoiceLog.clientEvent("session.update")
-        socket.send(VoiceToolDefinitions.sessionUpdateJson().toString())
+        socket.send(VoiceSessionUpdateBuilder.withTools().toString())
+    }
+
+    private fun sendToolsSessionRestore(socket: WebSocket) {
+        VoiceLog.clientEvent("session.update (restore tools after debug inject)")
+        socket.send(VoiceSessionUpdateBuilder.withTools().toString())
+    }
+
+    private fun sendPendingDebugText(socket: WebSocket, text: String) {
+        micGate.holdUntilSpokenDone()
+        VoiceLog.clientEvent("conversation.item.create (text: $text)")
+        socket.send(
+            JSONObject().apply {
+                put("type", "conversation.item.create")
+                put(
+                    "item",
+                    JSONObject().apply {
+                        put("type", "message")
+                        put("role", "user")
+                        put(
+                            "content",
+                            org.json.JSONArray().apply {
+                                put(
+                                    JSONObject().apply {
+                                        put("type", "input_text")
+                                        put("text", text)
+                                    },
+                                )
+                            },
+                        )
+                    },
+                )
+            }.toString(),
+        )
+        VoiceLog.clientEvent("response.create (after text message)")
+        socket.send(JSONObject().put("type", "response.create").toString())
+        scheduleResponseWatchdog(socket)
     }
 
     private fun handleServerEvent(socket: WebSocket, raw: String) {
@@ -218,12 +238,23 @@ class GrokVoiceSession(
                 sendSessionUpdate(socket)
             }
             "session.updated" -> {
-                if (!sessionConfigured) {
-                    sessionConfigured = true
-                    VoiceLog.i("Session", "Session configured — starting audio capture")
-                    listener.onSessionReady()
-                    listener.onStatusChanged("Ready…")
-                    startAudioCaptureAfterWarmup()
+                val pendingText = pendingDebugText
+                when {
+                    !sessionConfigured -> {
+                        sessionConfigured = true
+                        VoiceLog.i("Session", "Session configured — starting audio capture")
+                        listener.onSessionReady()
+                        listener.onStatusChanged("Ready…")
+                        startAudioCapture()
+                    }
+                    pendingText != null -> {
+                        pendingDebugText = null
+                        sendPendingDebugText(socket, pendingText)
+                    }
+                    awaitingToolsRestore -> {
+                        awaitingToolsRestore = false
+                        startAudioCapture()
+                    }
                 }
             }
             "input_audio_buffer.speech_started" -> {
@@ -293,9 +324,10 @@ class GrokVoiceSession(
                 VoiceLog.i("Session", "Response complete (had_audio=$hadAudio)")
                 if (sessionConfigured) {
                     listener.onStatusChanged("Listening")
-                    if (micPausedForTextInject && hadAudio) {
-                        micPausedForTextInject = false
-                        startAudioCaptureAfterWarmup()
+                    if (micGate.shouldResumeCaptureAfterResponse(hadAudio)) {
+                        micGate.onCaptureResumed()
+                        awaitingToolsRestore = true
+                        sendToolsSessionRestore(socket)
                     }
                 }
             }
@@ -311,7 +343,7 @@ class GrokVoiceSession(
         }
     }
 
-    private fun startAudioCaptureAfterWarmup() {
+    private fun startAudioCapture() {
         try {
             audioCapture.start(scope) { base64Chunk ->
                 audioChunksSent++
@@ -325,6 +357,7 @@ class GrokVoiceSession(
                     }.toString(),
                 )
             }
+            micGate.onCaptureStarted()
             listener.onStatusChanged("Listening")
             VoiceLog.i("Session", "Mic streaming active (100ms PCM16 chunks)")
         } catch (e: Exception) {

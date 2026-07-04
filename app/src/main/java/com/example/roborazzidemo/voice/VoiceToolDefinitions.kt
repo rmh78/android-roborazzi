@@ -4,13 +4,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object VoiceToolDefinitions {
-    val sessionInstructions: String = """
-        You are a voice assistant inside a demo Android app with screens: home, items list, and item detail.
-        Use tools for every navigation action and every question about what is on screen.
-        Never guess screen content — call describe_screen first when the user asks what they see.
-        Keep spoken answers short and direct.
-    """.trimIndent()
-
     fun toolsJson(): JSONArray = JSONArray().apply {
         put(
             JSONObject().apply {
@@ -109,56 +102,5 @@ object VoiceToolDefinitions {
         )
     }
 
-    fun sessionUpdateJson(): JSONObject = JSONObject().apply {
-        put("type", "session.update")
-        put(
-            "session",
-            JSONObject().apply {
-                put("voice", VoiceConstants.VOICE_ID)
-                put("instructions", sessionInstructions)
-                put("reasoning", JSONObject().put("effort", "none"))
-                put(
-                    "turn_detection",
-                    JSONObject().put("type", "server_vad"),
-                )
-                put(
-                    "audio",
-                    JSONObject().apply {
-                        put(
-                            "input",
-                            JSONObject().apply {
-                                put(
-                                    "format",
-                                    JSONObject().apply {
-                                        put("type", "audio/pcm")
-                                        put("rate", VoiceConstants.SAMPLE_RATE_HZ)
-                                    },
-                                )
-                                put(
-                                    "transcription",
-                                    JSONObject().apply {
-                                        put("model", "grok-transcribe")
-                                        put("language_hint", "en")
-                                    },
-                                )
-                            },
-                        )
-                        put(
-                            "output",
-                            JSONObject().apply {
-                                put(
-                                    "format",
-                                    JSONObject().apply {
-                                        put("type", "audio/pcm")
-                                        put("rate", VoiceConstants.SAMPLE_RATE_HZ)
-                                    },
-                                )
-                            },
-                        )
-                    },
-                )
-                put("tools", toolsJson())
-            },
-        )
-    }
+    fun sessionUpdateJson(): JSONObject = VoiceSessionUpdateBuilder.withTools()
 }

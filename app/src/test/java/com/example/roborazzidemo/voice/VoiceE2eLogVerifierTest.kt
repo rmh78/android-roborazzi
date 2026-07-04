@@ -21,12 +21,14 @@ class VoiceE2eLogVerifierTest {
     }
 
     @Test
-    fun verifyTextTurnSequence_passesForDirectSpokenResponse() {
+    fun verifyTextTurnSequence_passesForDirectSpokenNavigationResponse() {
         val log = """
-            I VoiceAssistant: [Debug] Forwarding text to session: Say a brief hello
-            D VoiceAssistant: [Session] → conversation.item.create (text: Say a brief hello)
+            I VoiceAssistant: [Debug] Forwarding text to session: Go to the items list
+            D VoiceAssistant: [Session] → session.update (direct-speech for debug inject)
+            D VoiceAssistant: [Session] ← session.updated | voice=human_Eve
+            D VoiceAssistant: [Session] → conversation.item.create (text: Go to the items list)
             D VoiceAssistant: [Session] → response.create (after text message)
-            I VoiceAssistant: [Debug] Injected text command: Say a brief hello
+            I VoiceAssistant: [Debug] Injected text command: Go to the items list
             D VoiceAssistant: [Session] ← response.created | response_id=abc
             D VoiceAssistant: [Session] ← response.audio.delta | bytes=35840
             D VoiceAssistant: [Session] ← response.done | response_id=abc
