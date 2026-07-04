@@ -9,6 +9,7 @@ class VoiceDebugBridgeTest {
     @After
     fun tearDown() {
         VoiceDebugBridge.sendTextCommand = null
+        VoiceDebugBridge.disconnectCommand = null
     }
 
     @Test
@@ -23,5 +24,19 @@ class VoiceDebugBridgeTest {
         VoiceDebugBridge.sendTextCommand = { received = it }
         assertTrue(VoiceDebugBridge.dispatch("Go to the items list"))
         assertTrue(received == "Go to the items list")
+    }
+
+    @Test
+    fun disconnect_returnsFalseWhenNoHandlerRegistered() {
+        VoiceDebugBridge.disconnectCommand = null
+        assertFalse(VoiceDebugBridge.disconnect())
+    }
+
+    @Test
+    fun disconnect_invokesRegisteredHandler() {
+        var called = false
+        VoiceDebugBridge.disconnectCommand = { called = true }
+        assertTrue(VoiceDebugBridge.disconnect())
+        assertTrue(called)
     }
 }

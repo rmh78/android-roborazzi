@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.roborazzidemo.voice.GrokVoiceSession
+import com.example.roborazzidemo.voice.VoiceDebugBridge
 import com.example.roborazzidemo.voice.VoiceLog
 import com.example.roborazzidemo.voice.VoiceSessionListener
 import com.example.roborazzidemo.voice.VoiceToolExecutor
@@ -77,6 +78,11 @@ class VoiceAssistantViewModel(
             listener = this,
         )
         session = voiceSession
+        VoiceDebugBridge.sendTextCommand = { text ->
+            VoiceLog.i("Debug", "Forwarding text to session: $text")
+            voiceSession.sendTextMessage(text)
+        }
+        VoiceDebugBridge.disconnectCommand = { disconnect() }
         voiceSession.connect()
 
         viewModelScope.launch {
@@ -88,6 +94,8 @@ class VoiceAssistantViewModel(
 
     fun disconnect() {
         VoiceLog.ui("Disconnect requested")
+        VoiceDebugBridge.sendTextCommand = null
+        VoiceDebugBridge.disconnectCommand = null
         session?.disconnect()
         session = null
         _uiState.update {
@@ -179,6 +187,8 @@ class VoiceAssistantViewModel(
 
     override fun onDisconnected() {
         VoiceLog.ui("Disconnected")
+        VoiceDebugBridge.sendTextCommand = null
+        VoiceDebugBridge.disconnectCommand = null
         _uiState.update {
             it.copy(
                 isConnected = false,
