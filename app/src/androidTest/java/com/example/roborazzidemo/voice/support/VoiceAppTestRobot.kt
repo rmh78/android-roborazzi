@@ -15,19 +15,25 @@ class VoiceAppTestRobot private constructor(
     fun assertAppVisible(timeoutMillis: Long = 90_000) = waitForAppShellVisible(timeoutMillis)
 
     private fun waitForAppShellVisible(timeoutMillis: Long) {
-        ensureAppInForeground()
-        try {
-            waitUntil(timeoutMillis, "Voice Assistant overlay was not visible on screen. ${diagnostics()}") {
-                isAppShellVisible()
-            }
-        } catch (_: IllegalStateException) {
-            if (isAppShellVisible()) return
-            VoiceE2ELog.detail("overlay not visible — relaunching app and retrying")
+        // ActivityScenarioRule already started MainActivity; avoid an immediate CLEAR_TOP
+        // relaunch that can race Compose rendering on cold CI emulator starts.
+        if (pollForAppShellVisible(timeoutMillis)) return
+
+        repeat(3) { attempt ->
+            VoiceE2ELog.detail("overlay not visible — relaunch attempt ${attempt + 1}")
             ensureAppInForeground()
-            waitUntil(30_000, "Voice Assistant overlay was not visible after relaunch. ${diagnostics()}") {
-                isAppShellVisible()
-            }
+            if (pollForAppShellVisible(60_000)) return
         }
+        error("Voice Assistant overlay was not visible after relaunch. ${diagnostics()}")
+    }
+
+    private fun pollForAppShellVisible(timeoutMillis: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            if (isAppShellVisible()) return true
+            Thread.sleep(POLL_MS)
+        }
+        return isAppShellVisible()
     }
 
     private fun ensureAppInForeground() {
@@ -39,7 +45,7 @@ class VoiceAppTestRobot private constructor(
             ?: error("Launch intent not found for ${context.packageName}")
         launcher.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         context.startActivity(launcher)
-        device.waitForIdle(3_000)
+        device.waitForIdle(5_000)
     }
 
     private fun isAppShellVisible(): Boolean =
