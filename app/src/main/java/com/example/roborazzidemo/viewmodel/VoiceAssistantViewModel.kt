@@ -30,6 +30,9 @@ data class VoiceUiState(
     val isConnected: Boolean = false,
     val status: String = "Disconnected",
     val isAssistantTurnActive: Boolean = false,
+    val isAssistantPlaybackActive: Boolean = false,
+    val isUserTurnAllowed: Boolean = false,
+    val turnPhase: VoiceTurnPhase = VoiceTurnPhase.Assistant,
     val audioLevel: Float = 0f,
     val liveUserText: String = "",
     val liveAssistantText: String = "",
@@ -58,6 +61,10 @@ class VoiceAssistantViewModel(
     val uiState: StateFlow<VoiceUiState> = _uiState.asStateFlow()
 
     private var session: GrokVoiceSession? = null
+    private var assistantBlockStartIndex: Int? = null
+    private var userSpeechActive: Boolean = false
+    private var pendingUserTranscript: String? = null
+    private var skipNextSpeechStoppedCommit: Boolean = false
 
     fun setMicrophonePermissionGranted(granted: Boolean) {
         VoiceLog.ui("Microphone permission: $granted")
@@ -97,6 +104,8 @@ class VoiceAssistantViewModel(
         VoiceDebugBridge.pulseMicLevelForSpeech = { text ->
             voiceSession.pulseMicLevelForSpeech(text)
         }
+        VoiceDebugBridge.beginTestUserSpeech = { voiceSession.beginTestUserSpeech() }
+        VoiceDebugBridge.endTestUserSpeech = { voiceSession.endTestUserSpeech() }
         voiceSession.connect()
 
         viewModelScope.launch {
@@ -116,11 +125,15 @@ class VoiceAssistantViewModel(
                 isConnected = false,
                 status = "Disconnected",
                 isAssistantTurnActive = false,
+                isAssistantPlaybackActive = false,
+                isUserTurnAllowed = false,
+                turnPhase = VoiceTurnPhase.Assistant,
                 audioLevel = 0f,
                 liveUserText = "",
                 liveAssistantText = "",
             )
         }
+        sessionUserTurnAllowed = false
     }
 
     override fun onSessionReady() {
@@ -130,6 +143,7 @@ class VoiceAssistantViewModel(
                 isConnected = true,
                 status = "Grok is greeting you…",
                 isAssistantTurnActive = true,
+                turnPhase = VoiceTurnPhase.Assistant,
                 errorMessage = null,
             )
         }
@@ -137,42 +151,157 @@ class VoiceAssistantViewModel(
 
     override fun onStatusChanged(status: String) {
         VoiceLog.ui("Status → $status")
-        _uiState.update {
-            it.copy(
-                status = status,
-                isAssistantTurnActive = assistantTurnActiveFromStatus(status),
-                errorMessage = if (status.equals("Error", ignoreCase = true)) it.errorMessage else null,
+        _uiState.update { state ->
+            val responding = status.contains("Grok is responding", ignoreCase = true)
+            val updated = if (responding) {
+                val flushed = flushLiveUserToLines(state)
+                if (assistantBlockStartIndex == null) {
+                    assistantBlockStartIndex = flushed.transcriptLines.size
+                }
+                flushed
+            } else {
+                state
+            }
+            applyUiUserTurnGate(
+                updated.copy(
+                    status = status,
+                    isAssistantTurnActive = assistantTurnActiveFromStatus(status),
+                    errorMessage = if (status.equals("Error", ignoreCase = true)) updated.errorMessage else null,
+                ),
             )
         }
     }
 
+    override fun onVoiceSyncChanged(assistantPlaybackActive: Boolean, userTurnAllowed: Boolean) {
+        sessionUserTurnAllowed = userTurnAllowed
+        _uiState.update { state ->
+            applyUiUserTurnGate(
+                state.copy(isAssistantPlaybackActive = assistantPlaybackActive),
+            )
+        }
+    }
+
+    private var sessionUserTurnAllowed: Boolean = false
+
+    private fun applyUiUserTurnGate(state: VoiceUiState): VoiceUiState {
+        val allowed = state.isConnected &&
+            sessionUserTurnAllowed &&
+            !state.isAssistantPlaybackActive &&
+            !state.isAssistantTurnActive &&
+            state.liveAssistantText.isBlank() &&
+            !userSpeechActive &&
+            userTurnAllowedFromStatus(state.status)
+        val phase = when {
+            !state.isConnected -> VoiceTurnPhase.Assistant
+            state.isAssistantPlaybackActive ||
+                state.isAssistantTurnActive ||
+                state.liveAssistantText.isNotBlank() ||
+                assistantPhaseStatus(state.status) -> VoiceTurnPhase.Assistant
+            userSpeechActive ||
+                state.status.contains("You are speaking", ignoreCase = true) ||
+                state.status.contains("Processing", ignoreCase = true) -> VoiceTurnPhase.User
+            allowed ||
+                (
+                    userTurnAllowedFromStatus(state.status) &&
+                        !state.isAssistantPlaybackActive &&
+                        state.liveAssistantText.isBlank() &&
+                        !assistantPhaseStatus(state.status)
+                    ) -> VoiceTurnPhase.Listening
+            else -> VoiceTurnPhase.Assistant
+        }
+        return state.copy(isUserTurnAllowed = allowed, turnPhase = phase)
+    }
+
+    private fun assistantPhaseStatus(status: String): Boolean =
+        status.contains("Grok is responding", ignoreCase = true) ||
+            status.contains("Grok is greeting", ignoreCase = true) ||
+            status.contains("Running ", ignoreCase = true) ||
+            status.contains("Preparing microphone", ignoreCase = true)
+
+    private fun userTurnAllowedFromStatus(status: String): Boolean =
+        when {
+            status.contains("Listening — ask a question", ignoreCase = true) -> true
+            status.equals("Listening", ignoreCase = true) -> true
+            else -> false
+        }
+
     override fun onUserSpeechStarted() {
         VoiceLog.ui("User speech started")
-        _uiState.update { it.copy(liveAssistantText = "") }
+        userSpeechActive = true
+        pendingUserTranscript = null
+        assistantBlockStartIndex = null
+        _uiState.update { applyUiUserTurnGate(it.copy(liveAssistantText = "", liveUserText = "")) }
     }
 
     override fun onUserSpeechStopped() {
         VoiceLog.ui("User speech stopped")
-    }
-
-    override fun onUserTranscriptUpdated(text: String) {
-        VoiceLog.ui("User transcript (live): $text")
-        _uiState.update { it.copy(liveUserText = text) }
-    }
-
-    override fun onUserTranscriptCompleted(text: String) {
-        VoiceLog.ui("User transcript (final): $text")
-        _uiState.update {
-            it.copy(
+        userSpeechActive = false
+        if (skipNextSpeechStoppedCommit) {
+            skipNextSpeechStoppedCommit = false
+            pendingUserTranscript = null
+            _uiState.update { it.copy(liveUserText = "") }
+            return
+        }
+        _uiState.update { state ->
+            val text = longestTranscript(pendingUserTranscript, state.liveUserText).trim()
+            if (text.isBlank()) return@update state
+            pendingUserTranscript = null
+            assistantBlockStartIndex = null
+            state.copy(
                 liveUserText = "",
-                transcriptLines = it.transcriptLines + TranscriptLine(TranscriptRole.User, text),
+                transcriptLines = insertOrMergeUserLine(
+                    lines = state.transcriptLines,
+                    text = text,
+                ),
             )
         }
     }
 
+    override fun onUserTranscriptUpdated(text: String) {
+        VoiceLog.ui("User transcript (live): $text")
+        pendingUserTranscript = longestTranscript(pendingUserTranscript, text)
+        _uiState.update { state ->
+            if (state.isAssistantTurnActive && state.liveAssistantText.isNotBlank()) {
+                state
+            } else {
+                state.copy(liveUserText = text)
+            }
+        }
+    }
+
+    override fun onUserTranscriptCompleted(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return
+        VoiceLog.ui("User transcript (final): $trimmed")
+        pendingUserTranscript = longestTranscript(pendingUserTranscript, trimmed)
+        if (userSpeechActive) {
+            _uiState.update { state ->
+                state.copy(liveUserText = longestTranscript(state.liveUserText, trimmed))
+            }
+            return
+        }
+        commitUserTranscript(trimmed)
+    }
+
+    override fun onUserTranscriptInjected(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return
+        VoiceLog.ui("User transcript (injected): $trimmed")
+        userSpeechActive = false
+        pendingUserTranscript = null
+        skipNextSpeechStoppedCommit = true
+        commitUserTranscript(trimmed, appendOnly = true)
+    }
+
     override fun onAssistantTranscriptDelta(delta: String) {
         VoiceLog.d("UI", "Assistant transcript delta: $delta")
-        _uiState.update { it.copy(liveAssistantText = it.liveAssistantText + delta) }
+        _uiState.update { state ->
+            val flushed = flushLiveUserToLines(state)
+            if (assistantBlockStartIndex == null) {
+                assistantBlockStartIndex = flushed.transcriptLines.size
+            }
+            applyUiUserTurnGate(flushed.copy(liveAssistantText = flushed.liveAssistantText + delta))
+        }
     }
 
     override fun onAssistantTranscriptDone() {
@@ -181,18 +310,20 @@ class VoiceAssistantViewModel(
             VoiceLog.ui("Assistant transcript (final): $assistantText")
         }
         _uiState.update { state ->
-            val text = state.liveAssistantText.trim()
-            if (text.isEmpty()) {
-                state
+            val flushed = flushLiveUserToLines(state)
+            val text = flushed.liveAssistantText.trim()
+            val updated = if (text.isEmpty()) {
+                flushed
             } else {
-                state.copy(
+                flushed.copy(
                     liveAssistantText = "",
-                    transcriptLines = state.transcriptLines + TranscriptLine(
+                    transcriptLines = flushed.transcriptLines + TranscriptLine(
                         TranscriptRole.Assistant,
                         text,
                     ),
                 )
             }
+            applyUiUserTurnGate(updated)
         }
     }
 
@@ -247,10 +378,14 @@ class VoiceAssistantViewModel(
                 isConnected = false,
                 status = "Disconnected",
                 isAssistantTurnActive = false,
+                isAssistantPlaybackActive = false,
+                isUserTurnAllowed = false,
+                turnPhase = VoiceTurnPhase.Assistant,
                 audioLevel = 0f,
                 errorMessage = reason,
             )
         }
+        sessionUserTurnAllowed = false
         session = null
     }
 
@@ -264,6 +399,112 @@ class VoiceAssistantViewModel(
         VoiceDebugBridge.sendSpokenUserCommand = null
         VoiceDebugBridge.disconnectCommand = null
         VoiceDebugBridge.pulseMicLevelForSpeech = null
+        VoiceDebugBridge.beginTestUserSpeech = null
+        VoiceDebugBridge.endTestUserSpeech = null
+    }
+
+    private fun commitUserTranscript(text: String, appendOnly: Boolean = false) {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return
+        _uiState.update { state ->
+            state.copy(
+                liveUserText = "",
+                transcriptLines = insertOrMergeUserLine(
+                    lines = state.transcriptLines,
+                    text = trimmed,
+                    insertBeforeIndex = if (appendOnly) {
+                        null
+                    } else {
+                        assistantBlockStartIndex
+                            ?: lateUserInsertIndex(state.transcriptLines)
+                    },
+                ),
+            )
+        }
+        assistantBlockStartIndex = null
+    }
+
+    private fun longestTranscript(existing: String?, incoming: String): String {
+        val trimmed = incoming.trim()
+        if (existing.isNullOrBlank()) return trimmed
+        return when {
+            trimmed.length >= existing.length && trimmed.startsWith(existing) -> trimmed
+            existing.length > trimmed.length && existing.startsWith(trimmed) -> existing
+            trimmed.length >= existing.length -> trimmed
+            else -> existing
+        }
+    }
+
+    private fun flushLiveUserToLines(state: VoiceUiState): VoiceUiState {
+        val live = state.liveUserText.trim()
+        if (live.isBlank()) return state
+        return state.copy(
+            liveUserText = "",
+            transcriptLines = insertOrMergeUserLine(
+                lines = state.transcriptLines,
+                text = live,
+                insertBeforeIndex = assistantBlockStartIndex
+                    ?: lateUserInsertIndex(state.transcriptLines),
+            ),
+        )
+    }
+
+    private fun insertOrMergeUserLine(
+        lines: List<TranscriptLine>,
+        text: String,
+        insertBeforeIndex: Int? = null,
+    ): List<TranscriptLine> {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return lines
+
+        val last = lines.lastOrNull()
+        when {
+            last?.role == TranscriptRole.User && last.text == trimmed -> return lines
+            last?.role == TranscriptRole.User && trimmed.startsWith(last.text) ->
+                return lines.dropLast(1) + TranscriptLine(TranscriptRole.User, trimmed)
+            last?.role == TranscriptRole.User && last.text.startsWith(trimmed) -> return lines
+            insertBeforeIndex != null -> {
+                val mergeIndex = (insertBeforeIndex - 1).takeIf { it >= 0 }
+                val preceding = mergeIndex?.let { lines.getOrNull(it) }
+                if (preceding?.role == TranscriptRole.User) {
+                    return mergeUserAtIndex(lines, mergeIndex, trimmed)
+                }
+                if (insertBeforeIndex <= lines.size) {
+                    return lines.toMutableList().apply {
+                        add(insertBeforeIndex, TranscriptLine(TranscriptRole.User, trimmed))
+                    }
+                }
+            }
+        }
+        return lines + TranscriptLine(TranscriptRole.User, trimmed)
+    }
+
+    private fun mergeUserAtIndex(
+        lines: List<TranscriptLine>,
+        index: Int,
+        text: String,
+    ): List<TranscriptLine> {
+        val existing = lines[index]
+        if (existing.role != TranscriptRole.User) return lines
+        val merged = when {
+            existing.text == text -> existing.text
+            text.startsWith(existing.text) -> text
+            existing.text.startsWith(text) -> existing.text
+            else -> text
+        }
+        if (merged == existing.text) return lines
+        return lines.toMutableList().apply {
+            set(index, TranscriptLine(TranscriptRole.User, merged))
+        }
+    }
+
+    private fun lateUserInsertIndex(lines: List<TranscriptLine>): Int? {
+        if (lines.isEmpty() || lines.last().role != TranscriptRole.Assistant) return null
+        val lastUserIdx = lines.indexOfLast { it.role == TranscriptRole.User }
+        if (lastUserIdx < 0) return null
+        val assistantsAfterLastUser = lines.size - lastUserIdx - 1
+        if (assistantsAfterLastUser <= 0) return null
+        return lines.lastIndex
     }
 
     private fun assistantTurnActiveFromStatus(status: String): Boolean =

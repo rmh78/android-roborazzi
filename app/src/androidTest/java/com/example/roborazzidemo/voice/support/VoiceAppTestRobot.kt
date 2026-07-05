@@ -101,19 +101,12 @@ class VoiceAppTestRobot private constructor(
         speak(text)
         waitForUserTurnRegistered(baseline, timeoutMillis / 4)
         waitForToolInvocation(toolName, baseline, timeoutMillis)
-        if (toolName !in TOOLS_SKIP_SPEECH_COMPLETE) {
-            // Tool invocation is bounded by timeoutMillis; Grok may keep streaming audio
-            // well after the tool runs, especially late in a long CI session.
-            waitForAssistantSpeechComplete(SPEECH_COMPLETE_TIMEOUT_MILLIS, baseline, activityAlreadySeen = true)
-        }
+        waitForListeningPhase(timeoutMillis)
         VoiceE2ELog.detail("tool complete: tool=$toolName status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
     }
 
     fun waitForReadyToSpeak(timeoutMillis: Long = 120_000) {
-        waitUntil(timeoutMillis, "Timed out waiting for voice assistant ready to accept speech. ${diagnostics()}") {
-            isReadyToAcceptSpeech()
-        }
-        device.waitForIdle(1_000)
+        waitForListeningPhase(timeoutMillis)
     }
 
     private data class ToolWaitBaseline(
@@ -200,7 +193,7 @@ class VoiceAppTestRobot private constructor(
             val turns = conversationTurnsIncludingLive()
             val youTurns = turns.count { it == "you" }
             val grokTurns = turns.count { it == "grok" }
-            if (isAssistantTurnActive()) {
+            if (isAssistantPhase() || isAssistantTurnActive()) {
                 sawActivity = true
             }
             if (isAssistantSpeaking(current)) {
@@ -218,7 +211,23 @@ class VoiceAppTestRobot private constructor(
             if (!device.findObjects(By.descContains("voice-transcript-live-grok")).isNullOrEmpty()) {
                 sawActivity = true
             }
-            sawActivity && isAssistantTurnFinished(current)
+            sawActivity && isListeningReady()
+        }
+    }
+
+    fun waitForListeningPhase(timeoutMillis: Long = 120_000) {
+        waitUntil(
+            timeoutMillis,
+            "Timed out waiting for listening-ready status. ${diagnostics()}",
+        ) {
+            assertConnectedDuringSync()
+            isListeningReady()
+        }
+    }
+
+    private fun assertConnectedDuringSync() {
+        if (isDisconnected()) {
+            error("Voice session disconnected while waiting for user turn gate. ${diagnostics()}")
         }
     }
 
@@ -293,18 +302,15 @@ class VoiceAppTestRobot private constructor(
             val turns = transcriptSummary()
             turns.isEmpty() || turns.first() == "grok"
         }
-        if (!isReadyToListen(status())) {
-            waitForAssistantSpeechComplete(
-                timeoutMillis = timeoutMillis,
-                baseline = toolWaitBaseline(),
-                activityAlreadySeen = transcriptSummary().isNotEmpty(),
-            )
-        }
+        waitForListeningPhase(timeoutMillis)
     }
 
     fun assertExchangeTurns(timeoutMillis: Long = 90_000) {
         val deadline = System.currentTimeMillis() + timeoutMillis
         while (System.currentTimeMillis() < deadline) {
+            if (isDisconnected()) {
+                error("Voice session disconnected during exchange turn wait. ${diagnostics()}")
+            }
             if (exchangeTurnsReady()) return
             Thread.sleep(POLL_MS)
         }
@@ -312,7 +318,7 @@ class VoiceAppTestRobot private constructor(
             VoiceE2ELog.detail(
                 "exchange turns recorded; proceeding without full session idle (${diagnostics()})",
             )
-            waitForListenStatus(60_000)
+            waitForListeningPhase(60_000)
             return
         }
         error("Expected valid user exchange turn(s). ${diagnostics()}")
@@ -327,14 +333,7 @@ class VoiceAppTestRobot private constructor(
     }
 
     private fun exchangeTurnsReady(): Boolean =
-        exchangeTurnsRecorded() && isReadyToAcceptSpeech()
-
-    private fun waitForListenStatus(timeoutMillis: Long) {
-        waitUntil(timeoutMillis, "Timed out waiting for listen status. ${diagnostics()}") {
-            val current = status()
-            isReadyToListen(current) && !isAssistantSpeaking(current)
-        }
-    }
+        exchangeTurnsRecorded() && isListeningReady()
 
     fun assertConversationTurnCounts(
         minYou: Int,
@@ -413,15 +412,19 @@ class VoiceAppTestRobot private constructor(
     private fun isAssistantTurnActive(): Boolean =
         device.findObject(By.desc("voice-assistant-turn-active")) != null
 
-    private fun isAssistantTurnIdle(): Boolean =
-        device.findObject(By.desc("voice-assistant-turn-idle")) != null
+    /** Status line is authoritative — Compose phase nodes can lag or go stale in UiAutomator. */
+    private fun isListeningReady(): Boolean {
+        val current = status()
+        return isReadyToListen(current) &&
+            !isAssistantSpeaking(current) &&
+            !isUserSpeaking(current)
+    }
 
-    private fun isAssistantTurnFinished(status: String): Boolean =
-        when {
-            isAssistantTurnIdle() -> isReadyToListen(status)
-            isAssistantTurnActive() -> false
-            else -> isReadyToListen(status) && !isAssistantSpeaking(status)
-        }
+    private fun isAssistantPhase(): Boolean =
+        device.findObject(By.desc("voice-turn-phase-assistant")) != null
+
+    private fun hasLiveGrokTranscript(): Boolean =
+        !device.findObjects(By.descContains("voice-transcript-live-grok")).isNullOrEmpty()
 
     private fun isAssistantSpeaking(status: String): Boolean =
         status.contains("Grok is responding", ignoreCase = true) ||
@@ -430,13 +433,19 @@ class VoiceAppTestRobot private constructor(
             status.contains("Running tool", ignoreCase = true) ||
             status.contains("Processing", ignoreCase = true)
 
+    private fun isUserSpeaking(status: String): Boolean =
+        status.contains("You are speaking", ignoreCase = true)
+
     private fun isResponseActivity(status: String): Boolean = isAssistantSpeaking(status)
 
     private fun isReadyToListen(status: String): Boolean =
-        status.contains("Listening — ask a question", ignoreCase = true) ||
-            status.equals("Listening", ignoreCase = true) ||
-            status.contains("Preparing microphone", ignoreCase = true) ||
-            (isAssistantTurnIdle() && device.findObject(By.text("AI RDY")) != null)
+        when {
+            isUserSpeaking(status) || isAssistantSpeaking(status) -> false
+            status.contains("Listening — ask a question", ignoreCase = true) -> true
+            status.equals("Listening", ignoreCase = true) -> true
+            status.contains("Preparing microphone", ignoreCase = true) -> true
+            else -> false
+        }
 
     private fun conversationTurnsIncludingLive(): List<String> = transcriptSummary()
 
@@ -526,9 +535,8 @@ class VoiceAppTestRobot private constructor(
         }
 
     companion object {
-        private const val POLL_MS = 500L
+        private const val POLL_MS = 200L
         private const val SPEECH_COMPLETE_TIMEOUT_MILLIS = 120_000L
-        private val TOOLS_SKIP_SPEECH_COMPLETE = setOf("navigate_to_screen", "open_list_item")
         private val INDEXED_TRANSCRIPT_REGEX = Regex("^voice-transcript-(\\d+)-(you|grok)$")
 
         private val STATUS_MARKERS = listOf(

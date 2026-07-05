@@ -25,6 +25,8 @@ interface VoiceSessionListener {
     fun onUserSpeechStopped()
     fun onUserTranscriptUpdated(text: String)
     fun onUserTranscriptCompleted(text: String)
+    /** Debug/CI inject — always commits immediately, bypassing live-speech deferral. */
+    fun onUserTranscriptInjected(text: String)
     fun onAssistantTranscriptDelta(delta: String)
     fun onAssistantTranscriptDone()
     fun onFunctionCall(name: String, arguments: JSONObject, callId: String)
@@ -32,6 +34,8 @@ interface VoiceSessionListener {
     /** @param recoverable when true the WebSocket stays open (typical API/mic errors). */
     fun onError(message: String, recoverable: Boolean = true)
     fun onDisconnected(reason: String? = null)
+    /** Playback active or session gate closed — UI/tests must wait before the next user turn. */
+    fun onVoiceSyncChanged(assistantPlaybackActive: Boolean, userTurnAllowed: Boolean)
 }
 
 class GrokVoiceSession(
@@ -50,7 +54,6 @@ class GrokVoiceSession(
     private var sessionUpdateSent = false
     private var responseWatchdogJob: Job? = null
     private var playbackFinalizeJob: Job? = null
-    private var respondingStallWatchdogJob: Job? = null
     private var activeResponseId: String? = null
     private var audioChunksSent = 0
     private var activeResponseHadAudio = false
@@ -60,7 +63,8 @@ class GrokVoiceSession(
     private var deferMicResumeForClientTool = false
     private var toolFollowupResponsePending = false
     private var toolFollowupResponseId: String? = null
-    private var suppressUserTranscripts = false
+    private var lastUserTranscriptItemId: String? = null
+    private var testUserSpeechPlayback = false
 
     val audioLevel: StateFlow<Float> = combine(
         audioCapture.audioLevel,
@@ -72,6 +76,10 @@ class GrokVoiceSession(
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
+
+    init {
+        audioPlayback.onIdleChanged = { publishVoiceSync() }
+    }
 
     fun connect() {
         if (webSocket != null) {
@@ -88,7 +96,7 @@ class GrokVoiceSession(
         deferMicResumeForClientTool = false
         toolFollowupResponsePending = false
         toolFollowupResponseId = null
-        suppressUserTranscripts = false
+        lastUserTranscriptItemId = null
         audioRoute.enterVoiceChat()
 
         VoiceLog.i("Session", "Connecting to ${VoiceConstants.REALTIME_URL}")
@@ -133,6 +141,8 @@ class GrokVoiceSession(
     private fun cleanupConnection(notifyListener: Boolean, disconnectReason: String? = null) {
         responseWatchdogJob?.cancel()
         responseWatchdogJob = null
+        playbackFinalizeJob?.cancel()
+        playbackFinalizeJob = null
         audioCapture.stop()
         syntheticMicLevel.cancel()
         audioPlayback.stop()
@@ -146,9 +156,10 @@ class GrokVoiceSession(
         deferMicResumeForClientTool = false
         toolFollowupResponsePending = false
         toolFollowupResponseId = null
-        suppressUserTranscripts = false
+        lastUserTranscriptItemId = null
         audioRoute.exitVoiceChat()
         VoiceLog.d("Session", "Connection cleaned up (audio_chunks_sent=$audioChunksSent)")
+        publishVoiceSync()
         if (notifyListener) {
             listener.onDisconnected(disconnectReason)
         }
@@ -158,7 +169,30 @@ class GrokVoiceSession(
         syntheticMicLevel.pulseForSpeech(text)
     }
 
+    /** Mute live mic while emulator TTS plays so server VAD cannot commit speaker audio. */
+    fun beginTestUserSpeech() {
+        testUserSpeechPlayback = true
+        audioCapture.setMuted(true)
+        VoiceLog.d("Session", "Test user speech playback started — mic muted")
+        publishVoiceSync()
+    }
+
+    fun endTestUserSpeech() {
+        testUserSpeechPlayback = false
+        resumeMicAfterEmulatorHalfDuplex()
+        VoiceLog.d("Session", "Test user speech playback ended — mic gate re-evaluated")
+        publishVoiceSync()
+    }
+
     fun sendSpokenUserMessage(text: String) {
+        if (!isUserTurnGateOpen()) {
+            VoiceLog.w("Session", "sendSpokenUserMessage blocked — user turn gate closed")
+            return
+        }
+        sendSpokenUserMessageNow(text)
+    }
+
+    private fun sendSpokenUserMessageNow(text: String) {
         val socket = webSocket ?: run {
             VoiceLog.w("Session", "sendSpokenUserMessage dropped — socket null")
             return
@@ -167,18 +201,39 @@ class GrokVoiceSession(
             VoiceLog.w("Session", "sendSpokenUserMessage dropped — session not configured")
             return
         }
+        publishVoiceSync()
         syntheticMicLevel.pulseForDuration(PROCESSING_MIC_PULSE_MS)
         clearResponseWatchdog()
+        audioCapture.setMuted(true)
+        micGate.pauseForTextInject()
+        publishVoiceSync()
         if (audioCapture.isCapturing()) {
-            audioCapture.stop()
-            micGate.pauseForTextInject()
             VoiceLog.clientEvent("input_audio_buffer.clear (before spoken user inject)")
             socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
-        } else {
-            micGate.pauseForTextInject()
         }
-        listener.onUserTranscriptCompleted(text)
+        listener.onUserTranscriptInjected(text)
         sendUserTextTurn(socket, text, logLabel = "spoken user")
+    }
+
+    private fun isUserTurnGateOpen(): Boolean =
+        VoiceTurnGate.isUserTurnAllowed(
+            sessionConfigured = sessionConfigured,
+            activeResponseId = activeResponseId,
+            toolFollowupResponsePending = toolFollowupResponsePending,
+            playbackIdle = audioPlayback.isIdle(),
+            micGateState = micGate.state,
+            captureActive = audioCapture.isCapturing(),
+            captureMuted = audioCapture.isMuted(),
+            testUserSpeechPlayback = testUserSpeechPlayback,
+        )
+
+    private fun publishVoiceSync() {
+        val playbackActive = !audioPlayback.isIdle()
+        val userTurnAllowed = isUserTurnGateOpen()
+        listener.onVoiceSyncChanged(
+            assistantPlaybackActive = playbackActive,
+            userTurnAllowed = userTurnAllowed,
+        )
     }
 
     fun sendTextMessage(text: String) {
@@ -191,13 +246,11 @@ class GrokVoiceSession(
             return
         }
         clearResponseWatchdog()
+        audioCapture.setMuted(true)
+        micGate.pauseForTextInject()
         if (audioCapture.isCapturing()) {
-            audioCapture.stop()
-            micGate.pauseForTextInject()
             VoiceLog.clientEvent("input_audio_buffer.clear (before text inject)")
             socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
-        } else {
-            micGate.pauseForTextInject()
         }
         pendingDebugText = text
         VoiceLog.clientEvent("session.update (direct-speech for debug inject)")
@@ -248,6 +301,7 @@ class GrokVoiceSession(
             }.toString(),
         )
         toolFollowupResponsePending = true
+        publishVoiceSync()
         VoiceLog.clientEvent("response.create (after tool result)")
         socket.send(JSONObject().put("type", "response.create").toString())
         scheduleResponseWatchdog(socket, WatchdogKind.TOOL_FOLLOWUP)
@@ -367,15 +421,27 @@ class GrokVoiceSession(
                 }
             }
             "input_audio_buffer.speech_started" -> {
-                if (suppressUserTranscripts) {
-                    VoiceLog.d("Session", "Ignoring speech_started during assistant turn")
+                if (shouldIgnoreSpeechVad()) {
+                    VoiceLog.d(
+                        "Session",
+                        "Ignoring speech_started (mic_gate=${micGate.state}, " +
+                            "response_id=$activeResponseId)",
+                    )
                     return
                 }
                 clearResponseWatchdog()
+                lastUserTranscriptItemId = null
+                if (!VoiceDeviceHints.useHalfDuplexVoice()) {
+                    audioPlayback.flush()
+                }
                 listener.onUserSpeechStarted()
                 listener.onStatusChanged("You are speaking")
             }
             "input_audio_buffer.speech_stopped" -> {
+                if (shouldIgnoreSpeechVad()) {
+                    VoiceLog.d("Session", "Ignoring speech_stopped (mic_gate=${micGate.state})")
+                    return
+                }
                 listener.onUserSpeechStopped()
                 listener.onStatusChanged("Processing…")
             }
@@ -383,25 +449,32 @@ class GrokVoiceSession(
                 VoiceLog.i("Session", "Audio committed — server VAD will create response")
             }
             "conversation.item.input_audio_transcription.updated" -> {
-                if (suppressUserTranscripts) return
                 val transcript = json.optString("transcript", "")
                 if (transcript.isNotBlank()) {
                     listener.onUserTranscriptUpdated(transcript)
                 }
             }
             "conversation.item.input_audio_transcription.completed" -> {
-                if (suppressUserTranscripts) return
-                val transcript = json.optString("transcript", "")
-                if (transcript.isNotBlank()) {
-                    listener.onUserTranscriptCompleted(transcript)
+                val itemId = json.optString("item_id", "")
+                val transcript = json.optString("transcript", "").trim()
+                if (transcript.isBlank()) return
+                if (itemId.isNotBlank() && itemId == lastUserTranscriptItemId) {
+                    VoiceLog.d(
+                        "Session",
+                        "Ignoring duplicate user transcript completed (item_id=$itemId)",
+                    )
+                    return
                 }
+                if (itemId.isNotBlank()) {
+                    lastUserTranscriptItemId = itemId
+                }
+                listener.onUserTranscriptCompleted(transcript)
             }
             "response.created" -> {
                 clearResponseWatchdog()
                 activeResponseId = json.optJSONObject("response")?.optString("id")
                 activeResponseHadAudio = false
-                suppressUserTranscripts = true
-                pauseMicForAssistantTurn(socket)
+                muteMicForEmulatorHalfDuplex()
                 if (toolFollowupResponsePending) {
                     toolFollowupResponseId = activeResponseId
                     VoiceLog.i(
@@ -411,14 +484,16 @@ class GrokVoiceSession(
                 }
                 VoiceLog.i("Session", "Response started (id=$activeResponseId)")
                 listener.onStatusChanged("Grok is responding…")
-                scheduleRespondingStallWatchdog(socket)
+                publishVoiceSync()
             }
             "response.output_audio.delta",
             "response.audio.delta",
             -> {
                 clearResponseWatchdog()
                 activeResponseHadAudio = true
+                muteMicForEmulatorHalfDuplex()
                 audioPlayback.playBase64Chunk(json.optString("delta", ""))
+                publishVoiceSync()
             }
             "response.output_audio_transcript.delta",
             "response.audio_transcript.delta",
@@ -446,7 +521,6 @@ class GrokVoiceSession(
                 listener.onFunctionCall(name, arguments, callId)
             }
             "response.done" -> {
-                clearRespondingStallWatchdog()
                 clearResponseWatchdog()
                 val responseId = activeResponseId
                 val hadAudio = activeResponseHadAudio
@@ -486,7 +560,7 @@ class GrokVoiceSession(
                             toolFollowupResponsePending = false
                             toolFollowupResponseId = null
                         }
-                        resumeListeningAfterResponse(socket, hadAudio)
+                        resumeListeningAfterResponse(hadAudio)
                     }
                 }
             }
@@ -495,6 +569,10 @@ class GrokVoiceSession(
                 val message = json.optJSONObject("error")?.optString("message")
                     ?: json.optString("error")
                     ?: json.optString("message", "Unknown voice API error")
+                if (isBenignApiError(message)) {
+                    VoiceLog.w("Session", "Benign API error (ignored): $message")
+                    return
+                }
                 VoiceLog.e("Session", "API error: $message")
                 listener.onError(message, recoverable = true)
             }
@@ -502,12 +580,31 @@ class GrokVoiceSession(
         }
     }
 
-    private fun pauseMicForAssistantTurn(socket: WebSocket) {
-        if (audioCapture.isCapturing()) {
-            audioCapture.stop()
-            VoiceLog.clientEvent("input_audio_buffer.clear (assistant turn)")
-            socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
+    /**
+     * Emulator half-duplex: stop streaming mic audio while Grok speaks (no AEC on AVD).
+     * Never sends [input_audio_buffer.clear] — server VAD owns committed audio.
+     */
+    private fun muteMicForEmulatorHalfDuplex() {
+        if (!VoiceDeviceHints.useHalfDuplexVoice() || !audioCapture.isCapturing() || audioCapture.isMuted()) {
+            return
         }
+        audioCapture.setMuted(true)
+        VoiceLog.d("Session", "Emulator half-duplex: mic muted during assistant speech")
+        publishVoiceSync()
+    }
+
+    private fun shouldIgnoreSpeechVad(): Boolean =
+        micGate.state != MicCaptureGate.State.Streaming ||
+            (VoiceDeviceHints.useHalfDuplexVoice() && activeResponseId != null) ||
+            (VoiceDeviceHints.useHalfDuplexVoice() && !audioPlayback.isIdle())
+
+    private fun resumeMicAfterEmulatorHalfDuplex() {
+        if (!VoiceDeviceHints.useHalfDuplexVoice() || !audioCapture.isMuted()) {
+            return
+        }
+        audioCapture.setMuted(false)
+        VoiceLog.d("Session", "Emulator half-duplex: mic resumed for user turn")
+        publishVoiceSync()
     }
 
     private fun resumeMicAfterInject(socket: WebSocket, hadAudio: Boolean) {
@@ -525,14 +622,26 @@ class GrokVoiceSession(
     }
 
     private fun startAudioCaptureAfterPlaybackIdle() {
-        audioPlayback.whenIdle {
-            startAudioCapture()
-        }
+        audioPlayback.whenIdle(
+            onIdle = { startAudioCapture() },
+            postDrainDelayMs = emulatorPlaybackTailMs(),
+        )
     }
+
+    private fun emulatorPlaybackTailMs(): Long =
+        if (VoiceDeviceHints.isLikelyEmulator()) EMULATOR_PLAYBACK_TAIL_MS else 0L
 
     private fun startAudioCapture() {
         scope.launch(Dispatchers.IO) {
             try {
+                if (audioCapture.isCapturing()) {
+                    audioCapture.setMuted(false)
+                    micGate.onCaptureStarted()
+                    listener.onStatusChanged("Listening — ask a question")
+                    publishVoiceSync()
+                    VoiceLog.i("Session", "Mic unmuted (capture already active)")
+                    return@launch
+                }
                 audioCapture.start(
                     onChunk = { base64Chunk ->
                         audioChunksSent++
@@ -551,9 +660,9 @@ class GrokVoiceSession(
                     },
                 )
                 micGate.onCaptureStarted()
-                suppressUserTranscripts = false
                 listener.onStatusChanged("Listening — ask a question")
-                VoiceLog.i("Session", "Mic streaming active (100ms PCM16 chunks)")
+                publishVoiceSync()
+                VoiceLog.i("Session", "Mic streaming active (20ms PCM16 chunks)")
             } catch (e: Exception) {
                 VoiceLog.e("Session", "Audio capture failed", e)
                 listener.onError(e.message ?: "Microphone capture failed", recoverable = true)
@@ -561,46 +670,11 @@ class GrokVoiceSession(
         }
     }
 
-    /**
-     * Guards only client-initiated [response.create] turns until [response.created] arrives.
-     * Not used for server-VAD commits — the server owns that lifecycle.
-     */
-    private fun scheduleRespondingStallWatchdog(socket: WebSocket) {
-        respondingStallWatchdogJob?.cancel()
-        respondingStallWatchdogJob = scope.launch {
-            delay(RESPONDING_STALL_TIMEOUT_MS)
-            val stalledResponseId = activeResponseId ?: return@launch
-            VoiceLog.w(
-                "Session",
-                "Responding stall watchdog fired (response_id=$stalledResponseId)",
-            )
-            VoiceLog.clientEvent("response.cancel (stall watchdog, response_id=$stalledResponseId)")
-            socket.send(
-                JSONObject().apply {
-                    put("type", "response.cancel")
-                    put("response_id", stalledResponseId)
-                }.toString(),
-            )
-            playbackFinalizeJob?.cancel()
-            playbackFinalizeJob = null
-            audioPlayback.stop()
-            activeResponseId = null
-            activeResponseHadAudio = false
-            deferMicResumeForClientTool = false
-            toolFollowupResponsePending = false
-            toolFollowupResponseId = null
-            suppressUserTranscripts = false
-            listener.onStatusChanged("Listening — ask a question")
-            resumeMicAfterInject(socket, hadAudio = false)
-        }
-    }
+    private fun isBenignApiError(message: String): Boolean =
+        message.contains("Cancellation failed", ignoreCase = true) ||
+            message.contains("no active response found", ignoreCase = true)
 
-    private fun clearRespondingStallWatchdog() {
-        respondingStallWatchdogJob?.cancel()
-        respondingStallWatchdogJob = null
-    }
-
-    private fun resumeListeningAfterResponse(socket: WebSocket, hadAudio: Boolean) {
+    private fun resumeListeningAfterResponse(hadAudio: Boolean) {
         playbackFinalizeJob?.cancel()
         playbackFinalizeJob = null
         var finalized = false
@@ -609,14 +683,24 @@ class GrokVoiceSession(
             finalized = true
             playbackFinalizeJob?.cancel()
             playbackFinalizeJob = null
-            suppressUserTranscripts = false
+            resumeMicAfterEmulatorHalfDuplex()
+            when {
+                micGate.shouldResumeMicAfterSpokenInject() -> micGate.onCaptureResumed()
+                micGate.state != MicCaptureGate.State.Streaming -> micGate.onCaptureResumed()
+            }
+            if (!VoiceDeviceHints.useHalfDuplexVoice() && audioCapture.isMuted()) {
+                audioCapture.setMuted(false)
+            }
+            publishVoiceSync()
             listener.onStatusChanged(
                 if (hadAudio) "Listening — ask a question" else "Listening",
             )
-            resumeMicAfterInject(socket, hadAudio)
         }
         if (hadAudio || !audioPlayback.isIdle()) {
-            audioPlayback.whenIdle { finalizeResponse() }
+            audioPlayback.whenIdle(
+                onIdle = { finalizeResponse() },
+                postDrainDelayMs = emulatorPlaybackTailMs(),
+            )
             playbackFinalizeJob = scope.launch {
                 delay(PLAYBACK_FINALIZE_TIMEOUT_MS)
                 if (!finalized) {
@@ -656,12 +740,12 @@ class GrokVoiceSession(
                     }.toString(),
                 )
             }
-            if (kind == WatchdogKind.RESPONSE_CREATE) {
-                VoiceLog.clientEvent("input_audio_buffer.clear (watchdog)")
-                socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
-            }
             activeResponseId = null
-            listener.onStatusChanged("Listening")
+            audioPlayback.stop()
+            if (micGate.shouldResumeMicAfterSpokenInject()) {
+                micGate.onCaptureResumed()
+            }
+            resumeListeningAfterResponse(hadAudio = false)
         }
     }
 
@@ -684,8 +768,8 @@ class GrokVoiceSession(
         private const val RESPONSE_CREATE_TIMEOUT_MS = 20_000L
         private const val TOOL_FOLLOWUP_TIMEOUT_MS = 60_000L
         private const val PLAYBACK_FINALIZE_TIMEOUT_MS = 45_000L
-        private const val RESPONDING_STALL_TIMEOUT_MS = 45_000L
-        private const val AUDIO_CHUNK_LOG_INTERVAL = 50
+        private const val EMULATOR_PLAYBACK_TAIL_MS = 500L
+        private const val AUDIO_CHUNK_LOG_INTERVAL = 250
         private const val PROCESSING_MIC_PULSE_MS = 1_500L
 
         /** Tools configured with type-only entries in session.update; executed by xAI, not the client. */

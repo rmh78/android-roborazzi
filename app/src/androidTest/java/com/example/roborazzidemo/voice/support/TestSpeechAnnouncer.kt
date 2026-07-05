@@ -9,7 +9,12 @@ import com.example.roborazzidemo.voice.VoiceDebugReceiver
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/** Emulator TTS playback + [VoiceDebugReceiver.ACTION_VOICE_SPOKEN] inject for E2E tests. */
+/**
+ * Plays audible user TTS, then injects the turn via [VoiceDebugReceiver.ACTION_VOICE_SPOKEN].
+ * The robot waits for [voice-turn-phase-listening] before calling [speak].
+ *
+ * Order: mute mic → TTS (user hears the prompt) → inject (transcript + server turn).
+ */
 object TestSpeechAnnouncer {
     private const val WARMUP_MS = 2_000L
     private const val TTS_TIMEOUT_MS = 45_000L
@@ -24,7 +29,18 @@ object TestSpeechAnnouncer {
 
     fun speak(context: Context, text: String) {
         if (speechEnabled()) {
-            playTts(context, text)
+            context.sendBroadcast(
+                Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_SPEECH_BEGIN)
+                    .setPackage(context.packageName),
+            )
+            try {
+                playTts(context, text)
+            } finally {
+                context.sendBroadcast(
+                    Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_SPEECH_END)
+                        .setPackage(context.packageName),
+                )
+            }
         }
         context.sendBroadcast(
             Intent(VoiceDebugReceiver.ACTION_VOICE_SPOKEN)

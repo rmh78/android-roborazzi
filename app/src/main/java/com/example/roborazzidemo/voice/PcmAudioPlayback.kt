@@ -4,92 +4,183 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.util.Base64
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.LinkedList
 
+/**
+ * PCM16 playback aligned with xAI's
+ * [PcmAudioSink](https://github.com/xai-org/xai-cookbook/tree/main/Android/VoiceApiAndroidExample).
+ */
 class PcmAudioPlayback {
     private var audioTrack: AudioTrack? = null
-    private val playbackQueue = LinkedList<FloatArray>()
+    private val playbackQueue = LinkedList<ByteArray>()
     private val lock = Any()
     private var isPlaying = false
     private var chunksPlayed = 0
 
+    @Volatile
+    private var totalFramesWritten: Long = 0
+
+    @Volatile
+    private var drainingPlayback = false
+
+    @Volatile
+    var onIdleChanged: ((Boolean) -> Unit)? = null
+
     fun playBase64Chunk(base64Audio: String) {
         if (base64Audio.isEmpty()) return
-        val samples = base64Pcm16ToFloat32(base64Audio)
+        val pcm16 = Base64.decode(base64Audio, Base64.NO_WRAP)
         synchronized(lock) {
-            playbackQueue.add(samples)
+            playbackQueue.add(pcm16)
             if (!isPlaying) {
                 isPlaying = true
+                notifyIdleChanged()
                 Thread { playNextChunk() }.start()
             }
         }
+    }
+
+    fun flush() {
+        synchronized(lock) {
+            playbackQueue.clear()
+            totalFramesWritten = 0
+            val track = audioTrack ?: return
+            try {
+                if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                    track.pause()
+                    track.flush()
+                    track.play()
+                }
+            } catch (e: IllegalStateException) {
+                VoiceLog.w("Playback", "AudioTrack.flush skipped: ${e.message}")
+            }
+            isPlaying = false
+            drainingPlayback = false
+        }
+        notifyIdleChanged()
+        VoiceLog.d("Playback", "Playback flushed (barge-in)")
     }
 
     fun stop() {
         synchronized(lock) {
             playbackQueue.clear()
             isPlaying = false
+            drainingPlayback = false
+            totalFramesWritten = 0
             releaseTrackLocked()
         }
         if (chunksPlayed > 0) {
             VoiceLog.i("Playback", "Stopped (chunks_played=$chunksPlayed)")
         }
         chunksPlayed = 0
+        notifyIdleChanged()
     }
 
     fun isIdle(): Boolean = synchronized(lock) {
-        !isPlaying && playbackQueue.isEmpty()
+        !isPlaying && playbackQueue.isEmpty() && !drainingPlayback
     }
 
-    fun whenIdle(onIdle: () -> Unit) {
+    fun whenIdle(onIdle: () -> Unit, postDrainDelayMs: Long = 0L) {
         Thread(
             {
                 while (true) {
                     synchronized(lock) {
                         if (!isPlaying && playbackQueue.isEmpty()) {
-                            releaseTrackLocked()
-                            VoiceLog.d("Playback", "Playback idle — ready for microphone capture")
-                            onIdle()
-                            return@Thread
+                            break
                         }
                     }
                     Thread.sleep(PLAYBACK_IDLE_POLL_MS)
                 }
+                drainingPlayback = true
+                notifyIdleChanged()
+                waitForPlaybackDrain(postDrainDelayMs)
+                synchronized(lock) {
+                    releaseTrackLocked()
+                    totalFramesWritten = 0
+                }
+                drainingPlayback = false
+                VoiceLog.d("Playback", "Playback idle — ready for microphone capture")
+                notifyIdleChanged()
+                onIdle()
             },
             "voice-playback-idle",
         ).start()
     }
 
+    private fun notifyIdleChanged() {
+        onIdleChanged?.invoke(isIdle())
+    }
+
+    private fun waitForPlaybackDrain(postDrainDelayMs: Long) {
+        val track = synchronized(lock) { audioTrack }
+        if (track == null) {
+            if (postDrainDelayMs > 0) Thread.sleep(postDrainDelayMs)
+            return
+        }
+        val targetFrames = totalFramesWritten
+        if (targetFrames > 0) {
+            val audioDurationMs =
+                (targetFrames * 1_000L) / VoiceConstants.SAMPLE_RATE_HZ
+            val slackFrames = playbackDrainSlackFrames()
+            val deadline = System.currentTimeMillis() +
+                audioDurationMs +
+                postDrainDelayMs +
+                PLAYBACK_DRAIN_MARGIN_MS
+            while (System.currentTimeMillis() < deadline) {
+                try {
+                    val head = track.playbackHeadPosition.toLong()
+                    if (head + slackFrames >= targetFrames) break
+                } catch (e: IllegalStateException) {
+                    VoiceLog.w("Playback", "Playback drain poll skipped: ${e.message}")
+                    break
+                }
+                Thread.sleep(PLAYBACK_HEAD_POLL_MS)
+            }
+        }
+        if (postDrainDelayMs > 0) {
+            Thread.sleep(postDrainDelayMs)
+        }
+    }
+
+    private fun playbackDrainSlackFrames(): Long =
+        if (VoiceDeviceHints.isLikelyEmulator()) {
+            EMULATOR_PLAYBACK_HEAD_SLACK_FRAMES
+        } else {
+            PLAYBACK_HEAD_SLACK_FRAMES
+        }
+
     private fun playNextChunk() {
         while (true) {
-            val chunk: FloatArray?
+            val chunk: ByteArray?
             synchronized(lock) {
                 if (playbackQueue.isEmpty()) {
                     isPlaying = false
+                    if (totalFramesWritten > 0) {
+                        drainingPlayback = true
+                    }
+                    notifyIdleChanged()
                     return
                 }
                 chunk = playbackQueue.poll()
             }
 
-            val samples = chunk ?: continue
+            val pcm16 = chunk ?: continue
             val track = synchronized(lock) {
                 ensureTrackLocked()
                 audioTrack
             } ?: return
 
-            val written = track.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
+            val written = track.write(pcm16, 0, pcm16.size, AudioTrack.WRITE_BLOCKING)
             if (written < 0) {
                 VoiceLog.e("Playback", "AudioTrack.write failed with code $written")
                 synchronized(lock) { isPlaying = false }
                 return
             }
+            totalFramesWritten += pcm16.size / BYTES_PER_FRAME
             chunksPlayed++
             if (chunksPlayed == 1 || chunksPlayed % PLAYBACK_LOG_INTERVAL == 0) {
                 VoiceLog.d(
                     "Playback",
-                    "Playing assistant audio (chunks=$chunksPlayed, samples=${samples.size}, written=$written)",
+                    "Playing assistant audio (chunks=$chunksPlayed, bytes=${pcm16.size}, written=$written)",
                 )
             }
         }
@@ -100,31 +191,30 @@ class PcmAudioPlayback {
         val minBuffer = AudioTrack.getMinBufferSize(
             VoiceConstants.SAMPLE_RATE_HZ,
             AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_FLOAT,
+            AudioFormat.ENCODING_PCM_16BIT,
         )
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build(),
             )
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setSampleRate(VoiceConstants.SAMPLE_RATE_HZ)
-                    .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build(),
             )
-            .setBufferSizeInBytes(minBuffer * 2)
+            .setBufferSizeInBytes(minBuffer)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
             .also { track ->
-                track.setVolume(1f)
                 track.play()
                 VoiceLog.i(
                     "Playback",
-                    "AudioTrack created (${VoiceConstants.SAMPLE_RATE_HZ}Hz mono PCM_FLOAT, voice communication)",
+                    "AudioTrack created (${VoiceConstants.SAMPLE_RATE_HZ}Hz mono PCM16, media usage)",
                 )
             }
     }
@@ -146,18 +236,13 @@ class PcmAudioPlayback {
         }
     }
 
-    private fun base64Pcm16ToFloat32(base64: String): FloatArray {
-        val bytes = Base64.decode(base64, Base64.NO_WRAP)
-        val shortBuffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-        val shorts = ShortArray(shortBuffer.remaining())
-        shortBuffer.get(shorts)
-        return FloatArray(shorts.size) { index ->
-            shorts[index] / 32768f
-        }
-    }
-
     companion object {
+        private const val BYTES_PER_FRAME = 2
         private const val PLAYBACK_LOG_INTERVAL = 25
         private const val PLAYBACK_IDLE_POLL_MS = 50L
+        private const val PLAYBACK_HEAD_POLL_MS = 20L
+        private const val PLAYBACK_DRAIN_MARGIN_MS = 1_500L
+        private const val PLAYBACK_HEAD_SLACK_FRAMES = 2_400L
+        private const val EMULATOR_PLAYBACK_HEAD_SLACK_FRAMES = 7_200L
     }
 }

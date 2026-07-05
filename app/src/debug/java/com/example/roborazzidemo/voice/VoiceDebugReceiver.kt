@@ -12,6 +12,8 @@ class VoiceDebugReceiver : BroadcastReceiver() {
             ACTION_VOICE_TEST_ANNOUNCE -> handleTestAnnounce(context, intent)
             ACTION_VOICE_TEXT -> handleVoiceText(intent)
             ACTION_VOICE_SPOKEN -> handleVoiceSpoken(intent)
+            ACTION_VOICE_TEST_SPEECH_BEGIN -> handleTestSpeechBegin()
+            ACTION_VOICE_TEST_SPEECH_END -> handleTestSpeechEnd()
             ACTION_VOICE_DISCONNECT -> handleDisconnect()
             else -> Unit
         }
@@ -60,6 +62,22 @@ class VoiceDebugReceiver : BroadcastReceiver() {
         }
     }
 
+    private fun handleTestSpeechBegin() {
+        if (VoiceDebugBridge.beginTestSpeech()) {
+            VoiceLog.d("Debug", "Test user speech playback begin — mic muted")
+        } else {
+            VoiceLog.w("Debug", "Test speech begin dropped — voice session not connected")
+        }
+    }
+
+    private fun handleTestSpeechEnd() {
+        if (VoiceDebugBridge.endTestSpeech()) {
+            VoiceLog.d("Debug", "Test user speech playback end")
+        } else {
+            VoiceLog.w("Debug", "Test speech end dropped — voice session not connected")
+        }
+    }
+
     private fun handleDisconnect() {
         val accepted = VoiceDebugBridge.disconnect()
         if (accepted) {
@@ -74,6 +92,8 @@ class VoiceDebugReceiver : BroadcastReceiver() {
         const val ACTION_VOICE_TEST_ANNOUNCE = "com.example.roborazzidemo.VOICE_TEST_ANNOUNCE"
         const val ACTION_VOICE_TEXT = "com.example.roborazzidemo.VOICE_TEXT"
         const val ACTION_VOICE_SPOKEN = "com.example.roborazzidemo.VOICE_SPOKEN"
+        const val ACTION_VOICE_TEST_SPEECH_BEGIN = "com.example.roborazzidemo.VOICE_TEST_SPEECH_BEGIN"
+        const val ACTION_VOICE_TEST_SPEECH_END = "com.example.roborazzidemo.VOICE_TEST_SPEECH_END"
         const val ACTION_VOICE_DISCONNECT = "com.example.roborazzidemo.VOICE_DISCONNECT"
         const val EXTRA_TEXT = "text"
     }

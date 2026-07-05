@@ -17,6 +17,12 @@ object VoiceDebugBridge {
     @Volatile
     var pulseMicLevelForSpeech: ((String) -> Unit)? = null
 
+    @Volatile
+    var beginTestUserSpeech: (() -> Unit)? = null
+
+    @Volatile
+    var endTestUserSpeech: (() -> Unit)? = null
+
     fun dispatch(text: String): Boolean {
         val handler = sendTextCommand ?: return false
         handler(text)
@@ -38,6 +44,18 @@ object VoiceDebugBridge {
     fun pulseMicLevel(text: String): Boolean {
         val handler = pulseMicLevelForSpeech ?: return false
         handler(text)
+        return true
+    }
+
+    fun beginTestSpeech(): Boolean {
+        val handler = beginTestUserSpeech ?: return false
+        handler()
+        return true
+    }
+
+    fun endTestSpeech(): Boolean {
+        val handler = endTestUserSpeech ?: return false
+        handler()
         return true
     }
 }
