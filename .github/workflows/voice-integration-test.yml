@@ -8,32 +8,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gradle-cache-warmup:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    permissions:
-      contents: read
-      actions: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Warm Gradle cache (assemble APKs)
-        run: bash scripts/run-gradle-cache-warmup.sh
-
   voice-integration:
-    needs: gradle-cache-warmup
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -62,6 +37,13 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          # setup-gradle defaults to read-only on non-default branches, which
+          # prevents PR runs from persisting a warmed cache for later runs.
+          cache-read-only: false
+
+      - name: Warm Gradle cache (assemble APKs)
+        run: bash scripts/run-gradle-cache-warmup.sh
 
       - name: Enable KVM
         run: |
