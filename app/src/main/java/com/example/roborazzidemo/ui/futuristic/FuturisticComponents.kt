@@ -59,8 +59,8 @@ fun HoloPanel(
             Brush.linearGradient(
                 colors = listOf(
                     accent.copy(alpha = 0.9f),
-                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f),
-                    accent.copy(alpha = 0.2f),
+                    MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f),
+                    accent.copy(alpha = 0.15f),
                 ),
             ),
         ),

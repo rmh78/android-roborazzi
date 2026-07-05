@@ -28,8 +28,8 @@ fun FuturisticBackground(modifier: Modifier = Modifier) {
     } else {
         NexusLabGrid.copy(alpha = 0.55f)
     }
-    val accentA = if (dark) NexusGlowCyan else NexusNeonCyan.copy(alpha = 0.12f)
-    val accentB = if (dark) NexusGlowMagenta else NexusNeonMagenta.copy(alpha = 0.08f)
+    val accentA = if (dark) NexusGlowCyan else NexusNeonCyan.copy(alpha = 0.10f)
+    val accentB = if (dark) NexusGlowMagenta else NexusNeonMagenta.copy(alpha = 0.06f)
     val primary = MaterialTheme.colorScheme.primary
     val horizonAlpha = if (dark) 0.25f else 0.15f
     val nodeAlpha = if (dark) 0.18f else 0.1f

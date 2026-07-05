@@ -62,8 +62,9 @@ fun VoiceTranscriptOverlay(
             1.dp,
             Brush.linearGradient(
                 colors = listOf(
-                    NexusNeonCyan.copy(alpha = 0.7f),
-                    NexusNeonMagenta.copy(alpha = 0.4f),
+                    NexusNeonCyan.copy(alpha = 0.85f),
+                    NexusNeonMagenta.copy(alpha = 0.55f),
+                    NexusNeonCyan.copy(alpha = 0.25f),
                 ),
             ),
         ),
@@ -163,6 +164,7 @@ fun VoiceTranscriptOverlay(
                                 Brush.horizontalGradient(
                                     colors = listOf(
                                         NexusNeonCyan,
+                                        NexusNeonCyan.copy(alpha = 0.55f),
                                         NexusNeonMagenta,
                                     ),
                                 ),

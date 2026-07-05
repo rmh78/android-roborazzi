@@ -86,7 +86,7 @@ fun LazyListScrollbar(
                     Brush.verticalGradient(
                         colors = listOf(
                             MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.secondary,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
                         ),
                     ),
                 ),

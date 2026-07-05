@@ -58,8 +58,8 @@ fun AppTopBar(
                     Brush.horizontalGradient(
                         colors = listOf(
                             Color.Transparent,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
                             Color.Transparent,
                         ),
                     ),
