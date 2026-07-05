@@ -10,7 +10,7 @@ concurrency:
 jobs:
   gradle-cache-warmup:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     permissions:
       contents: read
@@ -29,22 +29,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Warm Gradle cache with trivial connected test
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          disable-animations: true
-          emulator-boot-timeout: 900
-          script: bash scripts/run-gradle-cache-warmup.sh
+      - name: Warm Gradle cache (assemble APKs)
+        run: bash scripts/run-gradle-cache-warmup.sh
 
   voice-integration:
     needs: gradle-cache-warmup

@@ -1,19 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TEST_CLASS="com.example.roborazzidemo.ci.GradleCacheWarmupTest"
-
 log() {
   echo "[$(date -u +%H:%M:%S)] $*"
 }
 
-GRADLE_ARGS=(
-  :app:connectedDebugAndroidTest
-  --console=plain
+log "Warming Gradle cache (assemble debug app + androidTest APKs, no emulator)"
+./gradlew \
+  :app:assembleDebug \
+  :app:assembleDebugAndroidTest \
+  --console=plain \
   --stacktrace
-  "-Pandroid.testInstrumentationRunnerArguments.class=${TEST_CLASS}"
-)
-
-log "Running Gradle cache warmup (connected androidTest build + trivial launch test)"
-./gradlew "${GRADLE_ARGS[@]}"
 log "Gradle cache warmup passed"
