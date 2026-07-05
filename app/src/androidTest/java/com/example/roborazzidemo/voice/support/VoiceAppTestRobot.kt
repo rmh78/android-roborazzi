@@ -29,22 +29,28 @@ class VoiceAppTestRobot private constructor(
     fun speak(text: String) = TestSpeechAnnouncer.speak(context, text)
 
     fun speakAndWaitForResponse(text: String, timeoutMillis: Long = 120_000) {
+        VoiceE2ELog.step("speak (response): \"$text\"")
         val baseline = toolWaitBaseline()
         speak(text)
         waitForAssistantSpeechComplete(timeoutMillis, baseline)
+        VoiceE2ELog.detail("response complete: status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
     }
 
     fun speakAndWaitForTool(text: String, toolName: String, timeoutMillis: Long = 180_000) {
+        VoiceE2ELog.step("speak (tool=$toolName): \"$text\"")
         val baseline = toolWaitBaseline()
         speak(text)
         try {
             waitForToolInvocation(toolName, baseline, timeoutMillis)
             waitForAssistantSpeechComplete(timeoutMillis, baseline, activityAlreadySeen = true)
+            VoiceE2ELog.detail("tool complete: tool=$toolName status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
         } catch (_: IllegalStateException) {
+            VoiceE2ELog.step("retry speak (tool=$toolName): \"$text\"")
             val retryBaseline = toolWaitBaseline()
             speak(text)
             waitForToolInvocation(toolName, retryBaseline, timeoutMillis)
             waitForAssistantSpeechComplete(timeoutMillis, retryBaseline, activityAlreadySeen = true)
+            VoiceE2ELog.detail("tool complete (retry): tool=$toolName status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
         }
     }
 

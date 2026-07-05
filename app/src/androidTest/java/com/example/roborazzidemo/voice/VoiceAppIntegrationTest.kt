@@ -7,6 +7,7 @@ import androidx.test.rule.GrantPermissionRule
 import com.example.roborazzidemo.BuildConfig
 import com.example.roborazzidemo.MainActivity
 import com.example.roborazzidemo.voice.support.VoiceAppTestRobot
+import com.example.roborazzidemo.voice.support.VoiceE2ELog
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
@@ -39,73 +40,74 @@ class VoiceAppIntegrationTest {
             BuildConfig.XAI_API_KEY != "no-api-key",
         )
 
+        VoiceE2ELog.step("assert app and home screen visible")
         app.assertAppVisible()
         app.assertHomeScreenVisible()
 
-        // Connect: greeting + always-on listening
+        VoiceE2ELog.step("connect and wait for voice ready")
         app.connect()
         app.waitForVoiceReady(timeoutMillis = 120_000)
         app.assertConnectedVoiceChromeVisible()
         app.assertGreetingTurnIfPresent()
 
-        // Home — describe_screen
+        VoiceE2ELog.step("home — describe_screen")
         app.speakAndWaitForTool("describe the screen for me", "describe_screen")
         app.assertLastToolWas("describe_screen")
         app.assertExchangeTurns()
 
-        // web_search
+        VoiceE2ELog.step("web_search — weather in Munich")
         app.speakAndWaitForResponse("what is the weather in Munich", timeoutMillis = 120_000)
         app.assertExchangeTurns()
 
-        // Items list — navigate_to_screen(items)
+        VoiceE2ELog.step("navigate to items list")
         app.speakAndWaitForTool("navigate me to the list page", "navigate_to_screen")
         app.waitForItemsListScreen()
         app.assertExchangeTurns()
 
-        // Items list — open_list_item
+        VoiceE2ELog.step("open_list_item — scroll to item 10")
         app.speakAndWaitForTool("scroll to item 10 in the list", "open_list_item")
         app.waitForListItemVisible("Item 10")
         app.waitForListItemSelected(itemIndex = 10)
         app.assertExchangeTurns()
 
-        // Items list — describe_screen
+        VoiceE2ELog.step("items list — describe_screen")
         app.speakAndWaitForTool("describe the screen", "describe_screen")
         app.assertExchangeTurns()
 
-        // Item detail — navigate_to_screen(detail)
+        VoiceE2ELog.step("navigate to item 1 detail")
         app.speakAndWaitForTool("open the detail page for item 1", "navigate_to_screen")
         app.waitForItemDetailScreen("Item 1")
         app.assertExchangeTurns()
 
-        // Detail — describe_screen
+        VoiceE2ELog.step("detail — describe_screen")
         app.speakAndWaitForTool("what is on this screen", "describe_screen")
         app.assertExchangeTurns()
 
-        // Back to list — navigate_to_screen(items); "go back" from detail is ambiguous in CI
+        VoiceE2ELog.step("back to items list via navigate_to_screen")
         app.speakAndWaitForTool("navigate to the items list", "navigate_to_screen")
         app.waitForItemsListScreen()
         app.assertExchangeTurns()
 
-        // Not found — navigate_to_screen(detail, invalid id)
+        VoiceE2ELog.step("navigate to item 999 (not found)")
         app.speakAndWaitForTool("navigate to the detail page for item 999", "navigate_to_screen")
         app.waitForItemNotFoundScreen()
         app.assertExchangeTurns()
 
-        // Back to list — navigate_back
+        VoiceE2ELog.step("navigate_back from not-found to list")
         app.speakAndWaitForTool("go back", "navigate_back")
         app.waitForItemsListScreen()
         app.assertExchangeTurns()
 
-        // Home — navigate_to_screen(home)
+        VoiceE2ELog.step("navigate to home screen")
         app.speakAndWaitForTool("go to the home screen", "navigate_to_screen")
         app.waitForHomeScreen()
         app.assertExchangeTurns()
 
-        // Full conversation: optional Grok greeting, then alternating You→Grok exchanges
+        VoiceE2ELog.step("assert conversation turn counts and order")
         app.assertConversationTurnCounts(minYou = 11, minGrok = 10)
         app.assertValidConversationTurns()
 
-        // Disconnect
+        VoiceE2ELog.step("disconnect")
         app.disconnect()
         app.waitUntilDisconnected()
     }
