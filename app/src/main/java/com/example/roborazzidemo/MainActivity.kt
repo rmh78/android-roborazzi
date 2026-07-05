@@ -25,7 +25,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        hasRecordAudioPermission = hasMicrophonePermission()
+        refreshMicrophonePermission()
 
         setContent {
             VoiceAssistantRoot(
@@ -33,6 +33,15 @@ class MainActivity : ComponentActivity() {
                 onRequestRecordAudioPermission = ::requestMicrophonePermission,
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshMicrophonePermission()
+    }
+
+    private fun refreshMicrophonePermission() {
+        hasRecordAudioPermission = hasMicrophonePermission()
     }
 
     private fun hasMicrophonePermission(): Boolean {

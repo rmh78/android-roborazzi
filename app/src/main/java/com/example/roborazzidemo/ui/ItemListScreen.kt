@@ -23,6 +23,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import com.example.roborazzidemo.viewmodel.ItemListScrollController
 
 import androidx.compose.ui.res.stringResource
@@ -65,6 +67,7 @@ fun ItemListScreen(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
+                    .semantics { contentDescription = "item-list-screen" }
                     .testTag("item_list"),
             ) {
                 items(items, key = { it.id }) { item ->
