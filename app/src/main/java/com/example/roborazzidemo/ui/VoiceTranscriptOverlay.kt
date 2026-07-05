@@ -1,7 +1,6 @@
 package com.example.roborazzidemo.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,7 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -24,7 +22,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -32,13 +31,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.roborazzidemo.theme.NexusNeonCyan
-import com.example.roborazzidemo.theme.NexusNeonMagenta
+import com.example.roborazzidemo.theme.LcarsBlue
+import com.example.roborazzidemo.theme.LcarsBlueDeep
+import com.example.roborazzidemo.theme.LcarsOrange
 import com.example.roborazzidemo.theme.NexusOverlayInset
 import com.example.roborazzidemo.theme.NexusOverlayPanel
 import com.example.roborazzidemo.theme.NexusOverlayText
 import com.example.roborazzidemo.theme.NexusOverlayTextDim
-import com.example.roborazzidemo.ui.futuristic.ChamferedPanelShape
+import com.example.roborazzidemo.ui.futuristic.LcarsBarShape
+import com.example.roborazzidemo.ui.futuristic.LcarsPanelShape
 import com.example.roborazzidemo.viewmodel.TranscriptLine
 import com.example.roborazzidemo.viewmodel.TranscriptRole
 import com.example.roborazzidemo.viewmodel.VoiceUiState
@@ -49,38 +50,25 @@ fun VoiceTranscriptOverlay(
     onConnectChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = ChamferedPanelShape(cut = 16.dp)
-    Surface(
+    Column(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(16.dp)
             .testTag("voice_assistant_overlay"),
-        shape = shape,
-        color = NexusOverlayPanel,
-        border = BorderStroke(
-            1.dp,
-            Brush.linearGradient(
-                colors = listOf(
-                    NexusNeonCyan.copy(alpha = 0.85f),
-                    NexusNeonMagenta.copy(alpha = 0.55f),
-                    NexusNeonCyan.copy(alpha = 0.25f),
-                ),
-            ),
-        ),
-        tonalElevation = 0.dp,
-        shadowElevation = 8.dp,
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .height(12.dp)
+                .clip(LcarsBarShape())
+                .background(LcarsOrange),
+        )
         Column(
             modifier = Modifier
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            NexusOverlayInset.copy(alpha = 0.6f),
-                            NexusOverlayPanel,
-                        ),
-                    ),
-                )
+                .fillMaxWidth()
+                .clip(LcarsPanelShape())
+                .background(NexusOverlayPanel)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -91,9 +79,9 @@ fun VoiceTranscriptOverlay(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        text = "◈ NEURAL LINK",
+                        text = "VOICE INTERFACE",
                         style = MaterialTheme.typography.labelMedium,
-                        color = NexusNeonCyan,
+                        color = LcarsOrange,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
@@ -107,7 +95,7 @@ fun VoiceTranscriptOverlay(
                         "LINK",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (state.isConnected) {
-                            NexusNeonCyan
+                            LcarsOrange
                         } else {
                             NexusOverlayTextDim
                         },
@@ -117,8 +105,8 @@ fun VoiceTranscriptOverlay(
                         onCheckedChange = onConnectChange,
                         enabled = state.hasApiKey,
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = NexusNeonCyan,
-                            checkedTrackColor = NexusNeonCyan.copy(alpha = 0.35f),
+                            checkedThumbColor = LcarsOrange,
+                            checkedTrackColor = LcarsOrange.copy(alpha = 0.35f),
                             uncheckedThumbColor = NexusOverlayTextDim,
                             uncheckedTrackColor = NexusOverlayInset,
                         ),
@@ -153,23 +141,15 @@ fun VoiceTranscriptOverlay(
                     Text(
                         "SIG",
                         style = MaterialTheme.typography.labelSmall,
-                        color = NexusNeonMagenta,
+                        color = LcarsBlue,
                     )
                     Box(
                         modifier = Modifier
                             .padding(start = 8.dp)
                             .height(8.dp)
                             .width((8 + 112 * state.audioLevel).dp)
-                            .background(
-                                Brush.horizontalGradient(
-                                    colors = listOf(
-                                        NexusNeonCyan,
-                                        NexusNeonCyan.copy(alpha = 0.55f),
-                                        NexusNeonMagenta,
-                                    ),
-                                ),
-                                RoundedCornerShape(4.dp),
-                            )
+                            .clip(LcarsBarShape())
+                            .background(LcarsOrange)
                             .semantics {
                                 stateDescription = "audio-level-${"%.4f".format(state.audioLevel)}"
                             }
@@ -181,7 +161,7 @@ fun VoiceTranscriptOverlay(
                     Text(
                         text = "MODULE // ${state.lastToolName}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = NexusNeonCyan,
+                        color = LcarsBlue,
                         modifier = Modifier.semantics {
                             contentDescription = "voice-last-tool-${state.lastToolName}"
                         },
@@ -211,7 +191,8 @@ fun VoiceTranscriptOverlay(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(160.dp)
-                        .background(NexusOverlayInset, RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(NexusOverlayInset)
                         .padding(horizontal = 10.dp, vertical = 8.dp)
                         .verticalScroll(scrollState),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -260,8 +241,8 @@ private fun LiveTranscriptLine(
 ) {
     val role = prefix.lowercase()
     val prefixColor = when (prefix) {
-        "You" -> NexusNeonCyan
-        else -> NexusNeonMagenta
+        "You" -> LcarsOrange
+        else -> LcarsBlueDeep
     }
     val prefixLabel = when (prefix) {
         "You" -> "USR"

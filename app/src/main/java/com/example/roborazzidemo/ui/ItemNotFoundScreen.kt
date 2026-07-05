@@ -14,6 +14,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.roborazzidemo.R
+import com.example.roborazzidemo.theme.LcarsRed
 import com.example.roborazzidemo.ui.futuristic.HoloPanel
 import com.example.roborazzidemo.ui.futuristic.NexusSectionHeader
 
@@ -37,16 +38,17 @@ fun ItemNotFoundScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            HoloPanel(accent = MaterialTheme.colorScheme.error) {
+            HoloPanel(accent = LcarsRed) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     NexusSectionHeader(
-                        title = "Signal Lost",
-                        subtitle = "Target node does not exist in this sector",
+                        title = "No Match",
+                        subtitle = "Query returned zero records",
+                        accent = LcarsRed,
                     )
                     Text(
                         text = "⚠",
                         style = MaterialTheme.typography.displaySmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = LcarsRed,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(

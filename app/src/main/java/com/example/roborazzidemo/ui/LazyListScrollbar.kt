@@ -72,7 +72,7 @@ fun LazyListScrollbar(
                 .width(thickness)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(thickness / 2))
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
         )
 
         Box(
@@ -83,12 +83,7 @@ fun LazyListScrollbar(
                 .height(thumbHeight)
                 .clip(RoundedCornerShape(thickness / 2))
                 .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
-                        ),
-                    ),
+                    MaterialTheme.colorScheme.primary,
                 ),
         )
     }

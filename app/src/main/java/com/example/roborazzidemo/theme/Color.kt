@@ -2,30 +2,37 @@ package com.example.roborazzidemo.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Matrix dark — phosphor green on void black
+// LCARS dark — TNG bridge console (orange + blue)
 val NexusVoid = Color(0xFF000000)
-val NexusDeep = Color(0xFF020A02)
-val NexusPanel = Color(0xFF0A1A0A)
-val NexusNeonCyan = Color(0xFF00FF41)
-val NexusNeonMagenta = Color(0xFF00B32D)
-val NexusNeonViolet = Color(0xFF006622)
-val NexusGrid = Color(0xFF0D2B0D)
-val NexusTextDim = Color(0xFF4A7A4A)
-val NexusGlowCyan = Color(0x6600FF41)
-val NexusGlowMagenta = Color(0x4400B32D)
+val NexusDeep = Color(0xFF060A14)
+val NexusPanel = Color(0xFF101828)
+val NexusNeonCyan = Color(0xFFFF9900)
+val NexusNeonMagenta = Color(0xFF6699FF)
+val NexusNeonViolet = Color(0xFF99CCFF)
+val NexusGrid = Color(0xFF1A2840)
+val NexusTextDim = Color(0xFF8899BB)
+val NexusGlowCyan = Color(0x44FF9900)
+val NexusGlowMagenta = Color(0x336699FF)
 
-// Voice HUD — terminal black with green phosphor text
-val NexusOverlayPanel = Color(0xF5000802)
-val NexusOverlayInset = Color(0xFF020A04)
-val NexusOverlayText = Color(0xFFC8FFCC)
-val NexusOverlayTextDim = Color(0xFF4A8F52)
+val LcarsOrange = NexusNeonCyan
+val LcarsPeach = Color(0xFF99DDFF)
+val LcarsLavender = Color(0xFF5588DD)
+val LcarsBlue = NexusNeonViolet
+val LcarsBlueDeep = Color(0xFF3366AA)
+val LcarsRed = Color(0xFFCC4444)
 
-// Matrix light — faded CRT phosphor terminal
-val NexusLabBase = Color(0xFFE0F0E0)
-val NexusLabSurface = Color(0xFFF0FAF0)
-val NexusLabPanel = Color(0xFFF8FFF8)
-val NexusLabCyan = Color(0xFF007A1F)
-val NexusLabMagenta = Color(0xFF005C18)
-val NexusLabViolet = Color(0xFF003D10)
-val NexusLabGrid = Color(0xFFB8D8B8)
-val NexusLabTextDim = Color(0xFF3D6B3D)
+// Voice HUD
+val NexusOverlayPanel = Color(0xF5081018)
+val NexusOverlayInset = Color(0xFF060C14)
+val NexusOverlayText = Color(0xFFFFFFFF)
+val NexusOverlayTextDim = Color(0xFF8899BB)
+
+// LCARS light — auxiliary console
+val NexusLabBase = Color(0xFF141C2E)
+val NexusLabSurface = Color(0xFF1C2640)
+val NexusLabPanel = Color(0xFF243050)
+val NexusLabCyan = Color(0xFFE88800)
+val NexusLabMagenta = Color(0xFF6699FF)
+val NexusLabViolet = Color(0xFFAACCFF)
+val NexusLabGrid = Color(0xFF3A4A68)
+val NexusLabTextDim = Color(0xFF99AACC)

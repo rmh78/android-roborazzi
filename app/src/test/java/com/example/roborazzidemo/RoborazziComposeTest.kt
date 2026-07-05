@@ -18,9 +18,12 @@ import com.github.takahirom.roborazzi.JvmImageIoFormat
 import com.github.takahirom.roborazzi.LosslessWebPImageIoFormat
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.RoborazziOptions
+import com.github.takahirom.roborazzi.AwtImageWriter
 import com.github.takahirom.roborazzi.captureRoboImage
 import java.awt.image.BufferedImage
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import org.junit.Rule
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
@@ -69,8 +72,12 @@ abstract class RoborazziComposeTest {
 private fun losslessWebPImageIoFormat(): JvmImageIoFormat {
     val base = LosslessWebPImageIoFormat() as JvmImageIoFormat
     return base.copy(
+        awtImageWriter = AwtImageWriter { file, contextData, bufferedImage ->
+            base.awtImageWriter.write(file, contextData, bufferedImage)
+            truncateWebpToDeclaredRiffSize(file)
+        },
         awtImageLoader = AwtImageLoader { file ->
-            readImageWithSystemClassLoader(file)
+            readImageWithSystemClassLoader(truncatedWebpFile(file))
                 ?: error("Failed to read image: ${file.absolutePath}")
         },
     )
@@ -80,4 +87,22 @@ private fun readImageWithSystemClassLoader(file: File): BufferedImage? {
     val imageIoClass = ClassLoader.getSystemClassLoader().loadClass("javax.imageio.ImageIO")
     val readMethod = imageIoClass.getMethod("read", File::class.java)
     return readMethod.invoke(null, file) as? BufferedImage
+}
+
+private fun truncatedWebpFile(file: File): File {
+    truncateWebpToDeclaredRiffSize(file)
+    return file
+}
+
+private fun truncateWebpToDeclaredRiffSize(file: File) {
+    if (!file.exists() || file.length() < 12) return
+    val bytes = file.readBytes()
+    if (!bytes.copyOfRange(0, 4).contentEquals("RIFF".toByteArray())) return
+
+    val riffSize = ByteBuffer.wrap(bytes, 4, 4)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .int + 8
+    if (riffSize in 12..bytes.size && riffSize < bytes.size) {
+        file.writeBytes(bytes.copyOf(riffSize))
+    }
 }

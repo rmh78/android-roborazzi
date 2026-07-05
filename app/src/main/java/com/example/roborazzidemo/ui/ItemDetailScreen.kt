@@ -21,6 +21,7 @@ import com.example.roborazzidemo.R
 import com.example.roborazzidemo.model.Item
 import com.example.roborazzidemo.model.ItemIconType
 import com.example.roborazzidemo.model.sampleItems
+import com.example.roborazzidemo.theme.LcarsBlue
 import com.example.roborazzidemo.theme.RoborazziDemoTheme
 import com.example.roborazzidemo.ui.futuristic.HoloPanel
 import com.example.roborazzidemo.ui.futuristic.NexusSectionHeader
@@ -47,12 +48,13 @@ fun ItemDetailScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             HoloPanel(
-                accent = MaterialTheme.colorScheme.tertiary,
+                accent = LcarsBlue,
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     NexusSectionHeader(
-                        title = "Data Node",
-                        subtitle = "Encrypted payload · read-only",
+                        title = "Record File",
+                        subtitle = "Library computer access · read-only",
+                        accent = LcarsBlue,
                     )
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
