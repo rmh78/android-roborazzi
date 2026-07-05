@@ -83,8 +83,8 @@ class VoiceAppIntegrationTest {
         app.speakAndWaitForTool("what is on this screen", "describe_screen")
         app.assertExchangeTurns()
 
-        VoiceE2ELog.step("back to items list via navigate_back")
-        app.speakAndWaitForTool("go back", "navigate_back")
+        VoiceE2ELog.step("back to items list via navigate_to_screen")
+        app.speakAndWaitForTool("navigate to the items list", "navigate_to_screen")
         app.waitForItemsListScreen()
         app.assertExchangeTurns()
 

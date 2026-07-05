@@ -1,6 +1,7 @@
 package com.example.roborazzidemo.voice.support
 
 import android.content.Context
+import android.content.Intent
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.StaleObjectException
@@ -14,9 +15,31 @@ class VoiceAppTestRobot private constructor(
     fun assertAppVisible(timeoutMillis: Long = 90_000) = waitForAppShellVisible(timeoutMillis)
 
     private fun waitForAppShellVisible(timeoutMillis: Long) {
-        waitUntil(timeoutMillis, "Voice Assistant overlay was not visible on screen. ${diagnostics()}") {
-            isAppShellVisible()
+        ensureAppInForeground()
+        try {
+            waitUntil(timeoutMillis, "Voice Assistant overlay was not visible on screen. ${diagnostics()}") {
+                isAppShellVisible()
+            }
+        } catch (_: IllegalStateException) {
+            if (isAppShellVisible()) return
+            VoiceE2ELog.detail("overlay not visible — relaunching app and retrying")
+            ensureAppInForeground()
+            waitUntil(30_000, "Voice Assistant overlay was not visible after relaunch. ${diagnostics()}") {
+                isAppShellVisible()
+            }
         }
+    }
+
+    private fun ensureAppInForeground() {
+        if (!device.isScreenOn) {
+            device.wakeUp()
+            device.waitForIdle(500)
+        }
+        val launcher = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?: error("Launch intent not found for ${context.packageName}")
+        launcher.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        context.startActivity(launcher)
+        device.waitForIdle(3_000)
     }
 
     private fun isAppShellVisible(): Boolean =
