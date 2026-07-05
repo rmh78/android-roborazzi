@@ -32,7 +32,22 @@ GRADLE_ARGS=(
   "-Pandroid.testInstrumentationRunnerArguments.class=${TEST_CLASS}"
 )
 
+if [[ -z "${XAI_API_KEY:-}" ]]; then
+  echo "::error::XAI_API_KEY must be set for voice integration test"
+  exit 1
+fi
+
 log "Running voice integration test"
+bash scripts/verify-buildconfig-api-key.sh
 start_logcat
 ./gradlew "${GRADLE_ARGS[@]}"
-log "Voice integration test passed"
+
+RESULTS_DIR="app/build/outputs/androidTest-results/connected/debug"
+if [[ -d "$RESULTS_DIR" ]]; then
+  if grep -hE 'testsuite[^>]*skipped="[1-9]' "$RESULTS_DIR"/*.xml 2>/dev/null | grep -q .; then
+    echo "::error::Voice integration test was skipped — live API path did not run"
+    exit 1
+  fi
+fi
+
+log "Voice integration test passed (0 failures, 0 skipped)"

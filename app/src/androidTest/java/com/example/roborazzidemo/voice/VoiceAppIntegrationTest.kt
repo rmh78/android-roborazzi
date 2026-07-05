@@ -8,7 +8,6 @@ import com.example.roborazzidemo.BuildConfig
 import com.example.roborazzidemo.MainActivity
 import com.example.roborazzidemo.voice.support.VoiceAppTestRobot
 import com.example.roborazzidemo.voice.support.VoiceE2ELog
-import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -35,10 +34,9 @@ class VoiceAppIntegrationTest {
 
     @Test
     fun app_connects_exercisesAllVoiceToolsAndNavScreens_thenDisconnects() {
-        assumeTrue(
-            "Set XAI_API_KEY to run the live voice app integration test",
-            BuildConfig.XAI_API_KEY != "no-api-key",
-        )
+        check(BuildConfig.XAI_API_KEY != "no-api-key") {
+            "Set XAI_API_KEY before building — placeholder key means the live API test did not run"
+        }
 
         VoiceE2ELog.step("assert app and home screen visible")
         app.assertAppVisible()
