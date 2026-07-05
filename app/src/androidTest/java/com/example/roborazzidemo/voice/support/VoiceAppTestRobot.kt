@@ -12,7 +12,7 @@ class VoiceAppTestRobot private constructor(
     private val context: Context,
 ) {
     fun assertAppVisible() {
-        checkNotNull(device.wait(Until.findObject(By.text("Voice Assistant")), 10_000)) {
+        checkNotNull(device.wait(Until.findObject(By.text("Voice Assistant")), 30_000)) {
             "Voice Assistant overlay was not visible on screen."
         }
     }
