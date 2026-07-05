@@ -19,8 +19,8 @@ object VoiceDeviceHints {
         if (isLikelyEmulator()) {
             listOf(
                 MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 MediaRecorder.AudioSource.DEFAULT,
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
             )
         } else {
             listOf(

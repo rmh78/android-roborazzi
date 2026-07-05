@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -71,7 +72,7 @@ fun LazyListScrollbar(
                 .width(thickness)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(thickness / 2))
-                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
         )
 
         Box(
@@ -81,7 +82,9 @@ fun LazyListScrollbar(
                 .width(thickness)
                 .height(thumbHeight)
                 .clip(RoundedCornerShape(thickness / 2))
-                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)),
+                .background(
+                    MaterialTheme.colorScheme.primary,
+                ),
         )
     }
 }

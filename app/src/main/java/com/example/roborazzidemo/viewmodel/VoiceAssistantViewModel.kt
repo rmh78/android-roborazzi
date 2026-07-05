@@ -29,6 +29,7 @@ enum class TranscriptRole {
 data class VoiceUiState(
     val isConnected: Boolean = false,
     val status: String = "Disconnected",
+    val isAssistantTurnActive: Boolean = false,
     val audioLevel: Float = 0f,
     val liveUserText: String = "",
     val liveAssistantText: String = "",
@@ -37,7 +38,16 @@ data class VoiceUiState(
     val errorMessage: String? = null,
     val hasApiKey: Boolean = true,
     val hasMicrophonePermission: Boolean = false,
-)
+) {
+    companion object {
+        val RoborazziDisconnected = VoiceUiState(
+            isConnected = false,
+            status = "Disconnected",
+            hasApiKey = true,
+            hasMicrophonePermission = true,
+        )
+    }
+}
 
 class VoiceAssistantViewModel(
     private val apiKey: String,
@@ -84,6 +94,9 @@ class VoiceAssistantViewModel(
             voiceSession.sendSpokenUserMessage(text)
         }
         VoiceDebugBridge.disconnectCommand = { disconnect() }
+        VoiceDebugBridge.pulseMicLevelForSpeech = { text ->
+            voiceSession.pulseMicLevelForSpeech(text)
+        }
         voiceSession.connect()
 
         viewModelScope.launch {
@@ -102,6 +115,7 @@ class VoiceAssistantViewModel(
             it.copy(
                 isConnected = false,
                 status = "Disconnected",
+                isAssistantTurnActive = false,
                 audioLevel = 0f,
                 liveUserText = "",
                 liveAssistantText = "",
@@ -115,6 +129,7 @@ class VoiceAssistantViewModel(
             it.copy(
                 isConnected = true,
                 status = "Grok is greeting you…",
+                isAssistantTurnActive = true,
                 errorMessage = null,
             )
         }
@@ -125,6 +140,7 @@ class VoiceAssistantViewModel(
         _uiState.update {
             it.copy(
                 status = status,
+                isAssistantTurnActive = assistantTurnActiveFromStatus(status),
                 errorMessage = if (status.equals("Error", ignoreCase = true)) it.errorMessage else null,
             )
         }
@@ -195,7 +211,13 @@ class VoiceAssistantViewModel(
     }
 
     private fun updateActiveTool(name: String) {
-        _uiState.update { it.copy(lastToolName = name, status = "Running $name…") }
+        _uiState.update {
+            it.copy(
+                lastToolName = name,
+                status = "Running $name…",
+                isAssistantTurnActive = true,
+            )
+        }
     }
 
     override fun onError(message: String, recoverable: Boolean) {
@@ -208,6 +230,7 @@ class VoiceAssistantViewModel(
                     errorMessage = message,
                     status = "Error",
                     isConnected = false,
+                    isAssistantTurnActive = false,
                     audioLevel = 0f,
                 )
             }
@@ -223,6 +246,7 @@ class VoiceAssistantViewModel(
             it.copy(
                 isConnected = false,
                 status = "Disconnected",
+                isAssistantTurnActive = false,
                 audioLevel = 0f,
                 errorMessage = reason,
             )
@@ -239,7 +263,25 @@ class VoiceAssistantViewModel(
         VoiceDebugBridge.sendTextCommand = null
         VoiceDebugBridge.sendSpokenUserCommand = null
         VoiceDebugBridge.disconnectCommand = null
+        VoiceDebugBridge.pulseMicLevelForSpeech = null
     }
+
+    private fun assistantTurnActiveFromStatus(status: String): Boolean =
+        when {
+            status.contains("Listening", ignoreCase = true) -> false
+            status.contains("Preparing microphone", ignoreCase = true) -> false
+            status.contains("You are speaking", ignoreCase = true) -> false
+            status.contains("Processing", ignoreCase = true) -> false
+            status.contains("Disconnected", ignoreCase = true) -> false
+            status.contains("Waiting for conversation", ignoreCase = true) -> false
+            status.contains("Configuring session", ignoreCase = true) -> false
+            status.equals("Error", ignoreCase = true) -> false
+            status.contains("Grok is responding", ignoreCase = true) -> true
+            status.contains("Grok is greeting", ignoreCase = true) -> true
+            status.contains("Running ", ignoreCase = true) -> true
+            status.contains("Running tool", ignoreCase = true) -> true
+            else -> false
+        }
 
     class Factory(
         private val apiKey: String,

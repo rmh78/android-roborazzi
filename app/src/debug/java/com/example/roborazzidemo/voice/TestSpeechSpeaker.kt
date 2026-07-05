@@ -154,6 +154,7 @@ object TestSpeechSpeaker {
         )
 
         VoiceLog.i("TestSpeech", "Speaking through emulator audio: \"$text\"")
+        VoiceDebugBridge.pulseMicLevel(text)
         val params = Bundle().apply {
             putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1f)

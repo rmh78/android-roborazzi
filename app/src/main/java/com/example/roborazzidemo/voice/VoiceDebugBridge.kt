@@ -14,6 +14,9 @@ object VoiceDebugBridge {
     @Volatile
     var disconnectCommand: (() -> Unit)? = null
 
+    @Volatile
+    var pulseMicLevelForSpeech: ((String) -> Unit)? = null
+
     fun dispatch(text: String): Boolean {
         val handler = sendTextCommand ?: return false
         handler(text)
@@ -29,6 +32,12 @@ object VoiceDebugBridge {
     fun disconnect(): Boolean {
         val handler = disconnectCommand ?: return false
         handler()
+        return true
+    }
+
+    fun pulseMicLevel(text: String): Boolean {
+        val handler = pulseMicLevelForSpeech ?: return false
+        handler(text)
         return true
     }
 }

@@ -13,6 +13,5 @@ object GoldenImages {
     const val ITEM_NOT_FOUND = "ItemNotFoundScreen_default"
     const val NAV_BROWSE_ITEMS_LIST = "AppNavHost_browse_items_list"
     const val NAV_BROWSE_ITEMS_DETAIL = "AppNavHost_browse_items_detail"
-    const val NAV_SAMPLE_DETAIL = "AppNavHost_sample_detail"
     const val NAV_ITEM_NOT_FOUND = "AppNavHost_item_not_found"
 }

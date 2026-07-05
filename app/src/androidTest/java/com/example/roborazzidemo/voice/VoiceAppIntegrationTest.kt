@@ -65,6 +65,7 @@ class VoiceAppIntegrationTest {
         // Items list — open_list_item
         app.speakAndWaitForTool("scroll to item 10 in the list", "open_list_item")
         app.waitForListItemVisible("Item 10")
+        app.waitForListItemSelected(itemIndex = 10)
         app.assertExchangeTurns()
 
         // Items list — describe_screen
