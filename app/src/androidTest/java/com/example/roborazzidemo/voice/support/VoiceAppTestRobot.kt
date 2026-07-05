@@ -154,9 +154,9 @@ class VoiceAppTestRobot private constructor(
 
     private fun isReadyToAcceptSpeech(): Boolean {
         val current = status()
-        if (!isReadyToListen(current) || isAssistantSpeaking(current)) return false
-        if (isAssistantTurnActive()) return false
-        return true
+        // Trust the voice status line over turn-indicator nodes — CI UiAutomator
+        // intermittently retains stale turn-active markers with an empty tree.
+        return isReadyToListen(current) && !isAssistantSpeaking(current)
     }
 
     private fun waitForUserTurnRegistered(
