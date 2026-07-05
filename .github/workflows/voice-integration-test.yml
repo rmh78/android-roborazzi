@@ -55,14 +55,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-boot-timeout: 900
-          script: |
-            for attempt in 1 2; do
-              echo "Voice integration test attempt ${attempt}/2"
-              ./gradlew :app:connectedDebugAndroidTest --stacktrace -Pandroid.testInstrumentationRunnerArguments.class=com.example.roborazzidemo.voice.VoiceAppIntegrationTest && exit 0
-              adb shell am force-stop com.example.roborazzidemo || true
-              sleep 15
-            done
-            exit 1
+          script: bash scripts/run-voice-integration-test.sh
 
       - name: Upload connected test artifacts
         if: failure()
