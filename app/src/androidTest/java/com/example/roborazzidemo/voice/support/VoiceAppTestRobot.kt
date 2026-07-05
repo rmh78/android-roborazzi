@@ -76,7 +76,9 @@ class VoiceAppTestRobot private constructor(
         speak(text)
         waitForUserTurnRegistered(baseline, timeoutMillis / 4)
         waitForToolInvocation(toolName, baseline, timeoutMillis)
-        waitForAssistantSpeechComplete(timeoutMillis, baseline, activityAlreadySeen = true)
+        // Tool invocation is bounded by timeoutMillis; Grok may keep streaming audio
+        // well after the tool runs, especially late in a long CI session.
+        waitForAssistantSpeechComplete(SPEECH_COMPLETE_TIMEOUT_MILLIS, baseline, activityAlreadySeen = true)
         VoiceE2ELog.detail("tool complete: tool=$toolName status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
     }
 
@@ -274,7 +276,7 @@ class VoiceAppTestRobot private constructor(
         }
     }
 
-    fun assertExchangeTurns(timeoutMillis: Long = 60_000) {
+    fun assertExchangeTurns(timeoutMillis: Long = 120_000) {
         waitUntil(timeoutMillis, "Expected valid user exchange turn(s). ${diagnostics()}") {
             if (!isReadyToAcceptSpeech()) return@waitUntil false
             val current = status()
@@ -479,6 +481,7 @@ class VoiceAppTestRobot private constructor(
 
     companion object {
         private const val POLL_MS = 500L
+        private const val SPEECH_COMPLETE_TIMEOUT_MILLIS = 120_000L
         private val INDEXED_TRANSCRIPT_REGEX = Regex("^voice-transcript-(\\d+)-(you|grok)$")
 
         private val STATUS_MARKERS = listOf(
