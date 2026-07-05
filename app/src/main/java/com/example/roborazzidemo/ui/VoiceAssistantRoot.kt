@@ -2,6 +2,7 @@ package com.example.roborazzidemo.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import com.example.roborazzidemo.ui.futuristic.FuturisticBackground
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -49,6 +50,7 @@ fun VoiceAssistantRoot(
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
+            FuturisticBackground(modifier = Modifier.fillMaxSize())
             AppNavHost(
                 navController = navController,
                 scrollController = scrollController,

@@ -1,14 +1,16 @@
 package com.example.roborazzidemo.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,19 +18,22 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.roborazzidemo.ui.futuristic.ChamferedPanelShape
 import com.example.roborazzidemo.viewmodel.TranscriptLine
 import com.example.roborazzidemo.viewmodel.TranscriptRole
 import com.example.roborazzidemo.viewmodel.VoiceUiState
@@ -39,19 +44,38 @@ fun VoiceTranscriptOverlay(
     onConnectChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val shape = ChamferedPanelShape(cut = 16.dp)
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(16.dp)
             .testTag("voice_assistant_overlay"),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-        tonalElevation = 6.dp,
-        shadowElevation = 8.dp,
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.88f),
+        border = BorderStroke(
+            1.dp,
+            Brush.linearGradient(
+                colors = listOf(
+                    MaterialTheme.colorScheme.primary,
+                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
+                ),
+            ),
+        ),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+                            Color.Transparent,
+                        ),
+                    ),
+                )
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
@@ -59,17 +83,38 @@ fun VoiceTranscriptOverlay(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Voice Assistant",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "◈ NEURAL LINK",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "Voice Assistant",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Connect", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        "LINK",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (state.isConnected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
                     Switch(
                         checked = state.isConnected,
                         onCheckedChange = onConnectChange,
                         enabled = state.hasApiKey,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.primary,
+                            checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
                         modifier = Modifier
                             .testTag("voice_connect_switch")
                             .semantics { contentDescription = "voice-connect-switch" },
@@ -79,7 +124,7 @@ fun VoiceTranscriptOverlay(
 
             Text(
                 text = disconnectedStatus(state),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .testTag("voice_status_text")
@@ -98,14 +143,23 @@ fun VoiceTranscriptOverlay(
 
             if (state.isConnected) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Mic level", style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        "SIG",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
                     Box(
                         modifier = Modifier
                             .padding(start = 8.dp)
                             .height(8.dp)
                             .width((8 + 112 * state.audioLevel).dp)
                             .background(
-                                MaterialTheme.colorScheme.primary,
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primary,
+                                        MaterialTheme.colorScheme.secondary,
+                                    ),
+                                ),
                                 RoundedCornerShape(4.dp),
                             )
                             .semantics {
@@ -117,7 +171,7 @@ fun VoiceTranscriptOverlay(
 
                 if (state.lastToolName.isNotBlank()) {
                     Text(
-                        text = "Tool: ${state.lastToolName}",
+                        text = "MODULE // ${state.lastToolName}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.semantics {
@@ -199,6 +253,10 @@ private fun LiveTranscriptLine(
         "You" -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.secondary
     }
+    val prefixLabel = when (prefix) {
+        "You" -> "USR"
+        else -> "AI"
+    }
     Row(
         modifier = Modifier.clearAndSetSemantics {
             contentDescription = if (isLive) {
@@ -209,7 +267,7 @@ private fun LiveTranscriptLine(
         },
     ) {
         Text(
-            text = "$prefix: ",
+            text = "$prefixLabel: ",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
             color = prefixColor,
@@ -217,6 +275,7 @@ private fun LiveTranscriptLine(
         Text(
             text = text,
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
         )
     }
 }

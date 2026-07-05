@@ -13,6 +13,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -21,6 +22,8 @@ import com.example.roborazzidemo.model.Item
 import com.example.roborazzidemo.model.ItemIconType
 import com.example.roborazzidemo.model.sampleItems
 import com.example.roborazzidemo.theme.RoborazziDemoTheme
+import com.example.roborazzidemo.ui.futuristic.HoloPanel
+import com.example.roborazzidemo.ui.futuristic.NexusSectionHeader
 
 @Composable
 fun ItemDetailScreen(
@@ -28,6 +31,7 @@ fun ItemDetailScreen(
     onBack: () -> Unit,
 ) {
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             AppTopBar(
                 title = item.title,
@@ -39,28 +43,40 @@ fun ItemDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(24.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            HoloPanel(
+                accent = MaterialTheme.colorScheme.tertiary,
             ) {
-                Icon(
-                    imageVector = item.iconType.asImageVector(),
-                    contentDescription = stringResource(item.iconType.contentDescriptionRes),
-                    modifier = Modifier.size(item.iconSizeDp.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.headlineSmall,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    NexusSectionHeader(
+                        title = "Data Node",
+                        subtitle = "Encrypted payload · read-only",
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = item.iconType.asImageVector(),
+                            contentDescription = stringResource(item.iconType.contentDescriptionRes),
+                            modifier = Modifier.size(item.iconSizeDp.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = item.title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    Text(
+                        text = stringResource(item.descriptionRes),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            Text(
-                text = stringResource(item.descriptionRes),
-                style = MaterialTheme.typography.bodyLarge,
-            )
         }
     }
 }
@@ -68,7 +84,7 @@ fun ItemDetailScreen(
 @Preview(showBackground = true)
 @Composable
 private fun ItemDetailScreenPreview() {
-    RoborazziDemoTheme {
+    RoborazziDemoTheme(darkTheme = true) {
         ItemDetailScreen(
             item = sampleItems().first(),
             onBack = {},
@@ -79,7 +95,7 @@ private fun ItemDetailScreenPreview() {
 @Preview(showBackground = true, name = "Long description")
 @Composable
 private fun ItemDetailScreenLongPreview() {
-    RoborazziDemoTheme {
+    RoborazziDemoTheme(darkTheme = true) {
         ItemDetailScreen(
             item = Item(
                 id = 3,

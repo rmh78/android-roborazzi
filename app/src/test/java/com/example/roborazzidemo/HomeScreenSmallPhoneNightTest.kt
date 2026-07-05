@@ -1,0 +1,20 @@
+package com.example.roborazzidemo
+
+import com.example.roborazzidemo.ui.HomeScreen
+import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
+import org.junit.Test
+import org.robolectric.annotation.Config
+
+@Config(qualifiers = RobolectricDeviceQualifiers.SmallPhone, sdk = [33])
+class HomeScreenSmallPhoneNightTest : RoborazziComposeTest() {
+    @Test
+    fun homeScreen_small_phone_night() {
+        setThemedContent(darkTheme = true) {
+            HomeScreen(
+                onBrowseItems = {},
+                onViewSampleDetail = {},
+            )
+        }
+        captureScreenshot(GoldenImages.homeScreenResolution("small_phone", "night"))
+    }
+}

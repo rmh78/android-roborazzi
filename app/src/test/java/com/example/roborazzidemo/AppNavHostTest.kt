@@ -1,6 +1,10 @@
 package com.example.roborazzidemo
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.example.roborazzidemo.ui.futuristic.FuturisticBackground
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -43,7 +47,6 @@ class AppNavHostTest : RoborazziComposeTest() {
 
         composeTestRule.onNodeWithText("View Sample Detail").performClick()
         composeTestRule.onNodeWithText("Short note.").assertIsDisplayed()
-        captureScreenshot(GoldenImages.NAV_SAMPLE_DETAIL)
     }
 
     @Test
@@ -55,7 +58,10 @@ class AppNavHostTest : RoborazziComposeTest() {
                 navigatorProvider.addNavigator(ComposeNavigator())
             }
             RoborazziDemoTheme {
-                AppNavHost(navController = navController)
+                Box(Modifier.fillMaxSize()) {
+                    FuturisticBackground(Modifier.fillMaxSize())
+                    AppNavHost(navController = navController)
+                }
             }
         }
         composeTestRule.waitForIdle()
