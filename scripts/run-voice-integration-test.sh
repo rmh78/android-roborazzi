@@ -32,18 +32,7 @@ GRADLE_ARGS=(
   "-Pandroid.testInstrumentationRunnerArguments.class=${TEST_CLASS}"
 )
 
-for attempt in 1 2 3; do
-  log "Voice integration test attempt ${attempt}/3"
-  start_logcat
-  if ./gradlew "${GRADLE_ARGS[@]}"; then
-    log "Voice integration test passed on attempt ${attempt}"
-    exit 0
-  fi
-  stop_logcat
-  log "Attempt ${attempt} failed — restarting app before retry"
-  adb shell am force-stop com.example.roborazzidemo || true
-  sleep 15
-done
-
-log "Voice integration test failed after 3 attempts"
-exit 1
+log "Running voice integration test"
+start_logcat
+./gradlew "${GRADLE_ARGS[@]}"
+log "Voice integration test passed"

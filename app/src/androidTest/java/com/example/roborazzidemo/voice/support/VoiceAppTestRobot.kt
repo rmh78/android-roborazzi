@@ -37,29 +37,31 @@ class VoiceAppTestRobot private constructor(
     fun speak(text: String) = TestSpeechAnnouncer.speak(context, text)
 
     fun speakAndWaitForResponse(text: String, timeoutMillis: Long = 120_000) {
+        waitForReadyToSpeak()
         VoiceE2ELog.step("speak (response): \"$text\"")
         val baseline = toolWaitBaseline()
         speak(text)
+        waitForUserTurnRegistered(baseline, timeoutMillis / 4)
         waitForAssistantSpeechComplete(timeoutMillis, baseline)
         VoiceE2ELog.detail("response complete: status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
     }
 
     fun speakAndWaitForTool(text: String, toolName: String, timeoutMillis: Long = 180_000) {
+        waitForReadyToSpeak()
         VoiceE2ELog.step("speak (tool=$toolName): \"$text\"")
         val baseline = toolWaitBaseline()
         speak(text)
-        try {
-            waitForToolInvocation(toolName, baseline, timeoutMillis)
-            waitForAssistantSpeechComplete(timeoutMillis, baseline, activityAlreadySeen = true)
-            VoiceE2ELog.detail("tool complete: tool=$toolName status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
-        } catch (_: IllegalStateException) {
-            VoiceE2ELog.step("retry speak (tool=$toolName): \"$text\"")
-            val retryBaseline = toolWaitBaseline()
-            speak(text)
-            waitForToolInvocation(toolName, retryBaseline, timeoutMillis)
-            waitForAssistantSpeechComplete(timeoutMillis, retryBaseline, activityAlreadySeen = true)
-            VoiceE2ELog.detail("tool complete (retry): tool=$toolName status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
+        waitForUserTurnRegistered(baseline, timeoutMillis / 4)
+        waitForToolInvocation(toolName, baseline, timeoutMillis)
+        waitForAssistantSpeechComplete(timeoutMillis, baseline, activityAlreadySeen = true)
+        VoiceE2ELog.detail("tool complete: tool=$toolName status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
+    }
+
+    fun waitForReadyToSpeak(timeoutMillis: Long = 90_000) {
+        waitUntil(timeoutMillis, "Timed out waiting for voice assistant ready to accept speech. ${diagnostics()}") {
+            isReadyToAcceptSpeech()
         }
+        device.waitForIdle(1_000)
     }
 
     private data class ToolWaitBaseline(
@@ -95,6 +97,27 @@ class VoiceAppTestRobot private constructor(
                 -> false
                 else -> isReadyToListen(current)
             }
+        }
+    }
+
+    private fun isReadyToAcceptSpeech(): Boolean {
+        val current = status()
+        return isAssistantTurnIdle() &&
+            !isAssistantTurnActive() &&
+            !isAssistantSpeaking(current) &&
+            isReadyToListen(current)
+    }
+
+    private fun waitForUserTurnRegistered(
+        baseline: ToolWaitBaseline,
+        timeoutMillis: Long,
+    ) {
+        waitUntil(
+            timeoutMillis,
+            "Timed out waiting for spoken prompt to register. ${diagnostics()}",
+        ) {
+            conversationTurnsIncludingLive().count { it == "you" } > baseline.youTurns ||
+                device.findObject(By.desc("voice-transcript-live-you")) != null
         }
     }
 
@@ -228,12 +251,11 @@ class VoiceAppTestRobot private constructor(
         }
     }
 
-    fun assertExchangeTurns(timeoutMillis: Long = 30_000) {
+    fun assertExchangeTurns(timeoutMillis: Long = 60_000) {
         waitUntil(timeoutMillis, "Expected valid user exchange turn(s). ${diagnostics()}") {
+            if (!isReadyToAcceptSpeech()) return@waitUntil false
             val current = status()
             if (!isAssistantTurnFinished(current)) return@waitUntil false
-            if (!isReadyToListen(current)) return@waitUntil false
-            if (isAssistantSpeaking(current)) return@waitUntil false
             val turns = conversationTurnsIncludingLive()
             if (!isValidConversationTurnOrder(turns)) return@waitUntil false
             if (hasEchoTurnAfterGrok(turns)) return@waitUntil false
