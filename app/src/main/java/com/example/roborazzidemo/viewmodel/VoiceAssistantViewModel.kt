@@ -61,6 +61,7 @@ class VoiceAssistantViewModel(
     private var assistantBlockStartIndex: Int? = null
     private var userSpeechActive: Boolean = false
     private var pendingUserTranscript: String? = null
+    private var skipNextSpeechStoppedCommit: Boolean = false
 
     fun setMicrophonePermissionGranted(granted: Boolean) {
         VoiceLog.ui("Microphone permission: $granted")
@@ -170,6 +171,12 @@ class VoiceAssistantViewModel(
     override fun onUserSpeechStopped() {
         VoiceLog.ui("User speech stopped")
         userSpeechActive = false
+        if (skipNextSpeechStoppedCommit) {
+            skipNextSpeechStoppedCommit = false
+            pendingUserTranscript = null
+            _uiState.update { it.copy(liveUserText = "") }
+            return
+        }
         _uiState.update { state ->
             val text = longestTranscript(pendingUserTranscript, state.liveUserText).trim()
             if (text.isBlank()) return@update state
@@ -209,6 +216,16 @@ class VoiceAssistantViewModel(
             return
         }
         commitUserTranscript(trimmed)
+    }
+
+    override fun onUserTranscriptInjected(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return
+        VoiceLog.ui("User transcript (injected): $trimmed")
+        userSpeechActive = false
+        pendingUserTranscript = null
+        skipNextSpeechStoppedCommit = true
+        commitUserTranscript(trimmed, appendOnly = true)
     }
 
     override fun onAssistantTranscriptDelta(delta: String) {
@@ -314,7 +331,7 @@ class VoiceAssistantViewModel(
         VoiceDebugBridge.pulseMicLevelForSpeech = null
     }
 
-    private fun commitUserTranscript(text: String) {
+    private fun commitUserTranscript(text: String, appendOnly: Boolean = false) {
         val trimmed = text.trim()
         if (trimmed.isBlank()) return
         _uiState.update { state ->
@@ -323,8 +340,12 @@ class VoiceAssistantViewModel(
                 transcriptLines = insertOrMergeUserLine(
                     lines = state.transcriptLines,
                     text = trimmed,
-                    insertBeforeIndex = assistantBlockStartIndex
-                        ?: lateUserInsertIndex(state.transcriptLines),
+                    insertBeforeIndex = if (appendOnly) {
+                        null
+                    } else {
+                        assistantBlockStartIndex
+                            ?: lateUserInsertIndex(state.transcriptLines)
+                    },
                 ),
             )
         }

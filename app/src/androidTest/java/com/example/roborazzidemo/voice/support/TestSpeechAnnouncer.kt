@@ -23,14 +23,16 @@ object TestSpeechAnnouncer {
     }
 
     fun speak(context: Context, text: String) {
-        if (speechEnabled()) {
-            playTts(context, text)
-        }
+        // Inject before TTS — emulator mic picks up speaker audio and server VAD will
+        // commit garbage audio if TTS runs while the mic is hot.
         context.sendBroadcast(
             Intent(VoiceDebugReceiver.ACTION_VOICE_SPOKEN)
                 .setPackage(context.packageName)
                 .putExtra(VoiceDebugReceiver.EXTRA_TEXT, text),
         )
+        if (speechEnabled()) {
+            playTts(context, text)
+        }
     }
 
     private fun speechEnabled(): Boolean =

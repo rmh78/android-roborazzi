@@ -105,6 +105,8 @@ class VoiceAppTestRobot private constructor(
             // Tool invocation is bounded by timeoutMillis; Grok may keep streaming audio
             // well after the tool runs, especially late in a long CI session.
             waitForAssistantSpeechComplete(SPEECH_COMPLETE_TIMEOUT_MILLIS, baseline, activityAlreadySeen = true)
+        } else {
+            waitForListenStatus(timeoutMillis)
         }
         VoiceE2ELog.detail("tool complete: tool=$toolName status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
     }
@@ -417,11 +419,7 @@ class VoiceAppTestRobot private constructor(
         device.findObject(By.desc("voice-assistant-turn-idle")) != null
 
     private fun isAssistantTurnFinished(status: String): Boolean =
-        when {
-            isAssistantTurnIdle() -> isReadyToListen(status)
-            isAssistantTurnActive() -> false
-            else -> isReadyToListen(status) && !isAssistantSpeaking(status)
-        }
+        isReadyToListen(status) && !isAssistantSpeaking(status) && !isUserSpeaking(status)
 
     private fun isAssistantSpeaking(status: String): Boolean =
         status.contains("Grok is responding", ignoreCase = true) ||
@@ -430,13 +428,19 @@ class VoiceAppTestRobot private constructor(
             status.contains("Running tool", ignoreCase = true) ||
             status.contains("Processing", ignoreCase = true)
 
+    private fun isUserSpeaking(status: String): Boolean =
+        status.contains("You are speaking", ignoreCase = true)
+
     private fun isResponseActivity(status: String): Boolean = isAssistantSpeaking(status)
 
     private fun isReadyToListen(status: String): Boolean =
-        status.contains("Listening — ask a question", ignoreCase = true) ||
-            status.equals("Listening", ignoreCase = true) ||
-            status.contains("Preparing microphone", ignoreCase = true) ||
-            (isAssistantTurnIdle() && device.findObject(By.text("AI RDY")) != null)
+        when {
+            isUserSpeaking(status) || isAssistantSpeaking(status) -> false
+            status.contains("Listening — ask a question", ignoreCase = true) -> true
+            status.equals("Listening", ignoreCase = true) -> true
+            status.contains("Preparing microphone", ignoreCase = true) -> true
+            else -> false
+        }
 
     private fun conversationTurnsIncludingLive(): List<String> = transcriptSummary()
 

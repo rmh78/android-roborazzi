@@ -25,6 +25,8 @@ interface VoiceSessionListener {
     fun onUserSpeechStopped()
     fun onUserTranscriptUpdated(text: String)
     fun onUserTranscriptCompleted(text: String)
+    /** Debug/CI inject — always commits immediately, bypassing live-speech deferral. */
+    fun onUserTranscriptInjected(text: String)
     fun onAssistantTranscriptDelta(delta: String)
     fun onAssistantTranscriptDone()
     fun onFunctionCall(name: String, arguments: JSONObject, callId: String)
@@ -176,7 +178,7 @@ class GrokVoiceSession(
             VoiceLog.clientEvent("input_audio_buffer.clear (before spoken user inject)")
             socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
         }
-        listener.onUserTranscriptCompleted(text)
+        listener.onUserTranscriptInjected(text)
         sendUserTextTurn(socket, text, logLabel = "spoken user")
     }
 
@@ -364,6 +366,14 @@ class GrokVoiceSession(
                 }
             }
             "input_audio_buffer.speech_started" -> {
+                if (shouldIgnoreSpeechVad()) {
+                    VoiceLog.d(
+                        "Session",
+                        "Ignoring speech_started (mic_gate=${micGate.state}, " +
+                            "response_id=$activeResponseId)",
+                    )
+                    return
+                }
                 clearResponseWatchdog()
                 lastUserTranscriptItemId = null
                 if (!VoiceDeviceHints.useHalfDuplexVoice()) {
@@ -373,6 +383,10 @@ class GrokVoiceSession(
                 listener.onStatusChanged("You are speaking")
             }
             "input_audio_buffer.speech_stopped" -> {
+                if (shouldIgnoreSpeechVad()) {
+                    VoiceLog.d("Session", "Ignoring speech_stopped (mic_gate=${micGate.state})")
+                    return
+                }
                 listener.onUserSpeechStopped()
                 listener.onStatusChanged("Processing…")
             }
@@ -521,6 +535,11 @@ class GrokVoiceSession(
         VoiceLog.d("Session", "Emulator half-duplex: mic muted during assistant speech")
     }
 
+    private fun shouldIgnoreSpeechVad(): Boolean =
+        micGate.state != MicCaptureGate.State.Streaming ||
+            (VoiceDeviceHints.useHalfDuplexVoice() && activeResponseId != null) ||
+            (VoiceDeviceHints.useHalfDuplexVoice() && !audioPlayback.isIdle())
+
     private fun resumeMicAfterEmulatorHalfDuplex() {
         if (!VoiceDeviceHints.useHalfDuplexVoice() || !audioCapture.isMuted()) {
             return
@@ -604,6 +623,9 @@ class GrokVoiceSession(
             playbackFinalizeJob?.cancel()
             playbackFinalizeJob = null
             resumeMicAfterEmulatorHalfDuplex()
+            if (micGate.shouldResumeMicAfterSpokenInject()) {
+                micGate.onCaptureResumed()
+            }
             if (!VoiceDeviceHints.useHalfDuplexVoice() && audioCapture.isMuted()) {
                 audioCapture.setMuted(false)
             }
@@ -658,6 +680,9 @@ class GrokVoiceSession(
             activeResponseId = null
             listener.onStatusChanged("Listening — ask a question")
             resumeMicAfterEmulatorHalfDuplex()
+            if (micGate.shouldResumeMicAfterSpokenInject()) {
+                micGate.onCaptureResumed()
+            }
             if (!VoiceDeviceHints.useHalfDuplexVoice() && audioCapture.isMuted()) {
                 audioCapture.setMuted(false)
             }
