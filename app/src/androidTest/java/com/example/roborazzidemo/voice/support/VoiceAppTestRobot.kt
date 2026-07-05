@@ -1,7 +1,6 @@
 package com.example.roborazzidemo.voice.support
 
 import android.content.Context
-import android.content.Intent
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.StaleObjectException
@@ -22,7 +21,7 @@ class VoiceAppTestRobot private constructor(
         repeat(3) { attempt ->
             VoiceE2ELog.detail("overlay not visible — relaunch attempt ${attempt + 1}")
             ensureAppInForeground()
-            if (pollForAppShellVisible(60_000)) return
+            if (pollForAppLaunched(30_000) && pollForAppShellVisible(90_000)) return
         }
         error("Voice Assistant overlay was not visible after relaunch. ${diagnostics()}")
     }
@@ -30,10 +29,19 @@ class VoiceAppTestRobot private constructor(
     private fun pollForAppShellVisible(timeoutMillis: Long): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMillis
         while (System.currentTimeMillis() < deadline) {
-            if (isAppShellVisible()) return true
+            if (isVoiceOverlayVisible()) return true
             Thread.sleep(POLL_MS)
         }
-        return isAppShellVisible()
+        return isVoiceOverlayVisible()
+    }
+
+    private fun pollForAppLaunched(timeoutMillis: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            if (isAppContentVisible()) return true
+            Thread.sleep(POLL_MS)
+        }
+        return isAppContentVisible()
     }
 
     private fun ensureAppInForeground() {
@@ -41,18 +49,29 @@ class VoiceAppTestRobot private constructor(
             device.wakeUp()
             device.waitForIdle(500)
         }
-        val launcher = context.packageManager.getLaunchIntentForPackage(context.packageName)
-            ?: error("Launch intent not found for ${context.packageName}")
-        launcher.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        context.startActivity(launcher)
+        device.pressHome()
+        device.waitForIdle(1_000)
+        val component = "${context.packageName}/.MainActivity"
+        device.executeShellCommand("am start -W -n $component")
+        device.wait(Until.hasObject(By.pkg(context.packageName)), 15_000)
         device.waitForIdle(5_000)
     }
 
-    private fun isAppShellVisible(): Boolean =
+    private fun isAppContentVisible(): Boolean =
+        device.currentPackageName == context.packageName &&
+            (
+                device.findObject(By.text("Roborazzi Demo")) != null ||
+                    device.findObject(By.text("Items")) != null ||
+                    device.findObject(By.desc("item-list-screen")) != null
+                )
+
+    private fun isVoiceOverlayVisible(): Boolean =
         device.findObject(By.desc("voice-assistant-overlay")) != null ||
             device.findObject(By.desc("voice-connect-switch")) != null ||
             device.findObject(By.text("Voice Assistant")) != null ||
             device.findObject(By.text("VOICE INTERFACE")) != null
+
+    private fun isAppShellVisible(): Boolean = isVoiceOverlayVisible()
 
     fun assertHomeScreenVisible() = waitForHomeScreen(timeoutMillis = 5_000)
 
@@ -475,7 +494,8 @@ class VoiceAppTestRobot private constructor(
     }
 
     private fun diagnostics(): String =
-        "status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}] " +
+        "package=[${device.currentPackageName}] status=[${status()}] " +
+            "turns=[${conversationTurnsIncludingLive().joinToString()}] " +
             "visibleText=[${visibleUiText()}]"
 
     private fun <T> readSafely(default: T, block: () -> T): T =
@@ -516,7 +536,13 @@ class VoiceAppTestRobot private constructor(
             val context = instrumentation.targetContext
             TestSpeechAnnouncer.warmUp(context)
             val robot = VoiceAppTestRobot(device, context)
-            robot.waitForAppShellVisible(timeoutMillis = 90_000)
+            if (!robot.pollForAppLaunched(60_000)) {
+                robot.ensureAppInForeground()
+                check(robot.pollForAppLaunched(30_000)) {
+                    "App did not reach foreground. ${robot.diagnostics()}"
+                }
+            }
+            robot.waitForAppShellVisible(timeoutMillis = 120_000)
             VoiceE2ELog.step("voice assistant overlay visible")
             return robot
         }
