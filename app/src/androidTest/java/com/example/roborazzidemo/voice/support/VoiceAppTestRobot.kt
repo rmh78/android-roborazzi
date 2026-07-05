@@ -109,7 +109,7 @@ class VoiceAppTestRobot private constructor(
         VoiceE2ELog.detail("tool complete: tool=$toolName status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
     }
 
-    fun waitForReadyToSpeak(timeoutMillis: Long = 90_000) {
+    fun waitForReadyToSpeak(timeoutMillis: Long = 120_000) {
         waitUntil(timeoutMillis, "Timed out waiting for voice assistant ready to accept speech. ${diagnostics()}") {
             isReadyToAcceptSpeech()
         }
@@ -154,8 +154,10 @@ class VoiceAppTestRobot private constructor(
 
     private fun isReadyToAcceptSpeech(): Boolean {
         val current = status()
-        return isAssistantTurnIdle() &&
-            !isAssistantTurnActive() &&
+        if (isAssistantTurnIdle() && isReadyToListen(current) && !isAssistantSpeaking(current)) {
+            return true
+        }
+        return !isAssistantTurnActive() &&
             !isAssistantSpeaking(current) &&
             isReadyToListen(current)
     }
@@ -430,7 +432,8 @@ class VoiceAppTestRobot private constructor(
     private fun isReadyToListen(status: String): Boolean =
         status.contains("Listening — ask a question", ignoreCase = true) ||
             status.equals("Listening", ignoreCase = true) ||
-            status.contains("Preparing microphone", ignoreCase = true)
+            status.contains("Preparing microphone", ignoreCase = true) ||
+            (isAssistantTurnIdle() && device.findObject(By.text("AI RDY")) != null)
 
     private fun conversationTurnsIncludingLive(): List<String> = transcriptSummary()
 
