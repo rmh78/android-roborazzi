@@ -81,8 +81,8 @@ class VoiceAppIntegrationTest {
         app.speakAndWaitForTool("what is on this screen", "describe_screen")
         app.assertExchangeTurns()
 
-        // Back to list — navigate_back
-        app.speakAndWaitForTool("go back", "navigate_back")
+        // Back to list — navigate_to_screen(items); "go back" from detail is ambiguous in CI
+        app.speakAndWaitForTool("navigate to the items list", "navigate_to_screen")
         app.waitForItemsListScreen()
         app.assertExchangeTurns()
 
@@ -91,13 +91,18 @@ class VoiceAppIntegrationTest {
         app.waitForItemNotFoundScreen()
         app.assertExchangeTurns()
 
+        // Back to list — navigate_back
+        app.speakAndWaitForTool("go back", "navigate_back")
+        app.waitForItemsListScreen()
+        app.assertExchangeTurns()
+
         // Home — navigate_to_screen(home)
         app.speakAndWaitForTool("go to the home screen", "navigate_to_screen")
         app.waitForHomeScreen()
         app.assertExchangeTurns()
 
         // Full conversation: optional Grok greeting, then alternating You→Grok exchanges
-        app.assertConversationTurnCounts(minYou = 10, minGrok = 9)
+        app.assertConversationTurnCounts(minYou = 11, minGrok = 10)
         app.assertValidConversationTurns()
 
         // Disconnect
