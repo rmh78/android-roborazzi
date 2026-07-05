@@ -108,8 +108,7 @@ class VoiceAppTestRobot private constructor(
     }
 
     fun waitForReadyToSpeak(timeoutMillis: Long = 120_000) {
-        waitForUserTurnAllowed(timeoutMillis)
-        device.waitForIdle(500)
+        waitForListeningPhase(timeoutMillis)
     }
 
     private data class ToolWaitBaseline(
@@ -196,7 +195,7 @@ class VoiceAppTestRobot private constructor(
             val turns = conversationTurnsIncludingLive()
             val youTurns = turns.count { it == "you" }
             val grokTurns = turns.count { it == "grok" }
-            if (isAssistantTurnActive()) {
+            if (isAssistantPhase() || isAssistantTurnActive()) {
                 sawActivity = true
             }
             if (isAssistantSpeaking(current)) {
@@ -214,24 +213,17 @@ class VoiceAppTestRobot private constructor(
             if (!device.findObjects(By.descContains("voice-transcript-live-grok")).isNullOrEmpty()) {
                 sawActivity = true
             }
-            sawActivity && isUserTurnAllowed()
+            sawActivity && isListeningPhase()
         }
     }
 
-    fun waitForUserTurnAllowed(timeoutMillis: Long = 120_000) {
-        var stablePolls = 0
+    fun waitForListeningPhase(timeoutMillis: Long = 120_000) {
         waitUntil(
             timeoutMillis,
-            "Timed out waiting for voice-user-turn-allowed. ${diagnostics()}",
+            "Timed out waiting for voice-turn-phase-listening. ${diagnostics()}",
         ) {
             assertConnectedDuringSync()
-            if (isUserTurnAllowed()) {
-                stablePolls++
-                stablePolls >= CONSECUTIVE_READY_POLLS
-            } else {
-                stablePolls = 0
-                false
-            }
+            isListeningPhase()
         }
     }
 
@@ -312,13 +304,7 @@ class VoiceAppTestRobot private constructor(
             val turns = transcriptSummary()
             turns.isEmpty() || turns.first() == "grok"
         }
-        if (!isReadyToListen(status())) {
-            waitForAssistantSpeechComplete(
-                timeoutMillis = timeoutMillis,
-                baseline = toolWaitBaseline(),
-                activityAlreadySeen = transcriptSummary().isNotEmpty(),
-            )
-        }
+        waitForListeningPhase(timeoutMillis)
     }
 
     fun assertExchangeTurns(timeoutMillis: Long = 90_000) {
@@ -334,7 +320,7 @@ class VoiceAppTestRobot private constructor(
             VoiceE2ELog.detail(
                 "exchange turns recorded; proceeding without full session idle (${diagnostics()})",
             )
-            waitForUserTurnAllowed(60_000)
+            waitForListeningPhase(60_000)
             return
         }
         error("Expected valid user exchange turn(s). ${diagnostics()}")
@@ -349,7 +335,7 @@ class VoiceAppTestRobot private constructor(
     }
 
     private fun exchangeTurnsReady(): Boolean =
-        exchangeTurnsRecorded() && isUserTurnAllowed()
+        exchangeTurnsRecorded() && isListeningPhase()
 
     fun assertConversationTurnCounts(
         minYou: Int,
@@ -428,10 +414,12 @@ class VoiceAppTestRobot private constructor(
     private fun isAssistantTurnActive(): Boolean =
         device.findObject(By.desc("voice-assistant-turn-active")) != null
 
-    private fun isUserTurnAllowed(): Boolean =
-        device.findObject(By.desc("voice-user-turn-allowed")) != null &&
-            device.findObject(By.desc("voice-assistant-playback-idle")) != null &&
+    private fun isListeningPhase(): Boolean =
+        device.findObject(By.desc("voice-turn-phase-listening")) != null &&
             !hasLiveGrokTranscript()
+
+    private fun isAssistantPhase(): Boolean =
+        device.findObject(By.desc("voice-turn-phase-assistant")) != null
 
     private fun hasLiveGrokTranscript(): Boolean =
         !device.findObjects(By.descContains("voice-transcript-live-grok")).isNullOrEmpty()
@@ -545,8 +533,7 @@ class VoiceAppTestRobot private constructor(
         }
 
     companion object {
-        private const val POLL_MS = 500L
-        private const val CONSECUTIVE_READY_POLLS = 3
+        private const val POLL_MS = 200L
         private const val SPEECH_COMPLETE_TIMEOUT_MILLIS = 120_000L
         private val INDEXED_TRANSCRIPT_REGEX = Regex("^voice-transcript-(\\d+)-(you|grok)$")
 

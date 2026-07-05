@@ -32,6 +32,7 @@ data class VoiceUiState(
     val isAssistantTurnActive: Boolean = false,
     val isAssistantPlaybackActive: Boolean = false,
     val isUserTurnAllowed: Boolean = false,
+    val turnPhase: VoiceTurnPhase = VoiceTurnPhase.Assistant,
     val audioLevel: Float = 0f,
     val liveUserText: String = "",
     val liveAssistantText: String = "",
@@ -103,6 +104,8 @@ class VoiceAssistantViewModel(
         VoiceDebugBridge.pulseMicLevelForSpeech = { text ->
             voiceSession.pulseMicLevelForSpeech(text)
         }
+        VoiceDebugBridge.beginTestUserSpeech = { voiceSession.beginTestUserSpeech() }
+        VoiceDebugBridge.endTestUserSpeech = { voiceSession.endTestUserSpeech() }
         voiceSession.connect()
 
         viewModelScope.launch {
@@ -124,6 +127,7 @@ class VoiceAssistantViewModel(
                 isAssistantTurnActive = false,
                 isAssistantPlaybackActive = false,
                 isUserTurnAllowed = false,
+                turnPhase = VoiceTurnPhase.Assistant,
                 audioLevel = 0f,
                 liveUserText = "",
                 liveAssistantText = "",
@@ -139,6 +143,7 @@ class VoiceAssistantViewModel(
                 isConnected = true,
                 status = "Grok is greeting you…",
                 isAssistantTurnActive = true,
+                turnPhase = VoiceTurnPhase.Assistant,
                 errorMessage = null,
             )
         }
@@ -182,11 +187,30 @@ class VoiceAssistantViewModel(
         val allowed = state.isConnected &&
             sessionUserTurnAllowed &&
             !state.isAssistantPlaybackActive &&
+            !state.isAssistantTurnActive &&
             state.liveAssistantText.isBlank() &&
             !userSpeechActive &&
             userTurnAllowedFromStatus(state.status)
-        return state.copy(isUserTurnAllowed = allowed)
+        val phase = when {
+            !state.isConnected -> VoiceTurnPhase.Assistant
+            state.isAssistantPlaybackActive ||
+                state.isAssistantTurnActive ||
+                state.liveAssistantText.isNotBlank() ||
+                assistantPhaseStatus(state.status) -> VoiceTurnPhase.Assistant
+            userSpeechActive ||
+                state.status.contains("You are speaking", ignoreCase = true) ||
+                state.status.contains("Processing", ignoreCase = true) -> VoiceTurnPhase.User
+            allowed -> VoiceTurnPhase.Listening
+            else -> VoiceTurnPhase.Assistant
+        }
+        return state.copy(isUserTurnAllowed = allowed, turnPhase = phase)
     }
+
+    private fun assistantPhaseStatus(status: String): Boolean =
+        status.contains("Grok is responding", ignoreCase = true) ||
+            status.contains("Grok is greeting", ignoreCase = true) ||
+            status.contains("Running ", ignoreCase = true) ||
+            status.contains("Preparing microphone", ignoreCase = true)
 
     private fun userTurnAllowedFromStatus(status: String): Boolean =
         when {
@@ -350,6 +374,7 @@ class VoiceAssistantViewModel(
                 isAssistantTurnActive = false,
                 isAssistantPlaybackActive = false,
                 isUserTurnAllowed = false,
+                turnPhase = VoiceTurnPhase.Assistant,
                 audioLevel = 0f,
                 errorMessage = reason,
             )
@@ -368,6 +393,8 @@ class VoiceAssistantViewModel(
         VoiceDebugBridge.sendSpokenUserCommand = null
         VoiceDebugBridge.disconnectCommand = null
         VoiceDebugBridge.pulseMicLevelForSpeech = null
+        VoiceDebugBridge.beginTestUserSpeech = null
+        VoiceDebugBridge.endTestUserSpeech = null
     }
 
     private fun commitUserTranscript(text: String, appendOnly: Boolean = false) {

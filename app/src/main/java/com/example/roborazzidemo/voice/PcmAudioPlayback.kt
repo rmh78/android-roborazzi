@@ -241,8 +241,8 @@ class PcmAudioPlayback {
         private const val PLAYBACK_LOG_INTERVAL = 25
         private const val PLAYBACK_IDLE_POLL_MS = 50L
         private const val PLAYBACK_HEAD_POLL_MS = 20L
-        private const val PLAYBACK_DRAIN_MARGIN_MS = 5_000L
+        private const val PLAYBACK_DRAIN_MARGIN_MS = 1_500L
         private const val PLAYBACK_HEAD_SLACK_FRAMES = 2_400L
-        private const val EMULATOR_PLAYBACK_HEAD_SLACK_FRAMES = 24_000L
+        private const val EMULATOR_PLAYBACK_HEAD_SLACK_FRAMES = 7_200L
     }
 }

@@ -10,6 +10,8 @@
                 <action android:name="com.example.roborazzidemo.VOICE_TEST_ANNOUNCE" />
                 <action android:name="com.example.roborazzidemo.VOICE_TEXT" />
                 <action android:name="com.example.roborazzidemo.VOICE_SPOKEN" />
+                <action android:name="com.example.roborazzidemo.VOICE_TEST_SPEECH_BEGIN" />
+                <action android:name="com.example.roborazzidemo.VOICE_TEST_SPEECH_END" />
                 <action android:name="com.example.roborazzidemo.VOICE_DISCONNECT" />
             </intent-filter>
         </receiver>

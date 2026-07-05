@@ -64,6 +64,7 @@ class GrokVoiceSession(
     private var toolFollowupResponsePending = false
     private var toolFollowupResponseId: String? = null
     private var lastUserTranscriptItemId: String? = null
+    private var testUserSpeechPlayback = false
 
     val audioLevel: StateFlow<Float> = combine(
         audioCapture.audioLevel,
@@ -168,14 +169,27 @@ class GrokVoiceSession(
         syntheticMicLevel.pulseForSpeech(text)
     }
 
+    /** Mute live mic while emulator TTS plays so server VAD cannot commit speaker audio. */
+    fun beginTestUserSpeech() {
+        testUserSpeechPlayback = true
+        audioCapture.setMuted(true)
+        VoiceLog.d("Session", "Test user speech playback started — mic muted")
+        publishVoiceSync()
+    }
+
+    fun endTestUserSpeech() {
+        testUserSpeechPlayback = false
+        resumeMicAfterEmulatorHalfDuplex()
+        VoiceLog.d("Session", "Test user speech playback ended — mic gate re-evaluated")
+        publishVoiceSync()
+    }
+
     fun sendSpokenUserMessage(text: String) {
-        scope.launch {
-            if (!awaitUserTurnGate(USER_TURN_GATE_TIMEOUT_MS)) {
-                VoiceLog.w("Session", "sendSpokenUserMessage blocked — user turn gate closed")
-                return@launch
-            }
-            sendSpokenUserMessageNow(text)
+        if (!isUserTurnGateOpen()) {
+            VoiceLog.w("Session", "sendSpokenUserMessage blocked — user turn gate closed")
+            return
         }
+        sendSpokenUserMessageNow(text)
     }
 
     private fun sendSpokenUserMessageNow(text: String) {
@@ -201,15 +215,6 @@ class GrokVoiceSession(
         sendUserTextTurn(socket, text, logLabel = "spoken user")
     }
 
-    private suspend fun awaitUserTurnGate(timeoutMs: Long): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            if (isUserTurnGateOpen()) return true
-            delay(USER_TURN_GATE_POLL_MS)
-        }
-        return isUserTurnGateOpen()
-    }
-
     private fun isUserTurnGateOpen(): Boolean =
         VoiceTurnGate.isUserTurnAllowed(
             sessionConfigured = sessionConfigured,
@@ -219,6 +224,7 @@ class GrokVoiceSession(
             micGateState = micGate.state,
             captureActive = audioCapture.isCapturing(),
             captureMuted = audioCapture.isMuted(),
+            testUserSpeechPlayback = testUserSpeechPlayback,
         )
 
     private fun publishVoiceSync() {
@@ -734,14 +740,11 @@ class GrokVoiceSession(
                 )
             }
             activeResponseId = null
-            listener.onStatusChanged("Listening — ask a question")
-            resumeMicAfterEmulatorHalfDuplex()
+            audioPlayback.stop()
             if (micGate.shouldResumeMicAfterSpokenInject()) {
                 micGate.onCaptureResumed()
             }
-            if (!VoiceDeviceHints.useHalfDuplexVoice() && audioCapture.isMuted()) {
-                audioCapture.setMuted(false)
-            }
+            resumeListeningAfterResponse(hadAudio = false)
         }
     }
 
@@ -764,11 +767,9 @@ class GrokVoiceSession(
         private const val RESPONSE_CREATE_TIMEOUT_MS = 20_000L
         private const val TOOL_FOLLOWUP_TIMEOUT_MS = 60_000L
         private const val PLAYBACK_FINALIZE_TIMEOUT_MS = 45_000L
-        private const val EMULATOR_PLAYBACK_TAIL_MS = 1_200L
+        private const val EMULATOR_PLAYBACK_TAIL_MS = 500L
         private const val AUDIO_CHUNK_LOG_INTERVAL = 250
         private const val PROCESSING_MIC_PULSE_MS = 1_500L
-        private const val USER_TURN_GATE_TIMEOUT_MS = 120_000L
-        private const val USER_TURN_GATE_POLL_MS = 50L
 
         /** Tools configured with type-only entries in session.update; executed by xAI, not the client. */
         private val SERVER_EXECUTED_TOOLS = setOf("web_search", "x_search", "file_search")
