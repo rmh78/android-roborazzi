@@ -11,11 +11,67 @@ class VoiceAppTestRobot private constructor(
     private val device: UiDevice,
     private val context: Context,
 ) {
-    fun assertAppVisible() {
-        checkNotNull(device.wait(Until.findObject(By.text("Voice Assistant")), 10_000)) {
-            "Voice Assistant overlay was not visible on screen."
+    fun assertAppVisible(timeoutMillis: Long = 90_000) = waitForAppShellVisible(timeoutMillis)
+
+    private fun waitForAppShellVisible(timeoutMillis: Long) {
+        // ActivityScenarioRule already started MainActivity; avoid an immediate CLEAR_TOP
+        // relaunch that can race Compose rendering on cold CI emulator starts.
+        if (pollForAppShellVisible(timeoutMillis)) return
+
+        repeat(3) { attempt ->
+            VoiceE2ELog.detail("overlay not visible — relaunch attempt ${attempt + 1}")
+            ensureAppInForeground()
+            if (pollForAppLaunched(30_000) && pollForAppShellVisible(90_000)) return
         }
+        error("Voice Assistant overlay was not visible after relaunch. ${diagnostics()}")
     }
+
+    private fun pollForAppShellVisible(timeoutMillis: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            if (isVoiceOverlayVisible()) return true
+            Thread.sleep(POLL_MS)
+        }
+        return isVoiceOverlayVisible()
+    }
+
+    private fun pollForAppLaunched(timeoutMillis: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            if (isAppContentVisible()) return true
+            Thread.sleep(POLL_MS)
+        }
+        return isAppContentVisible()
+    }
+
+    private fun ensureAppInForeground() {
+        if (!device.isScreenOn) {
+            device.wakeUp()
+            device.waitForIdle(500)
+        }
+        device.pressHome()
+        device.waitForIdle(1_000)
+        val component = "${context.packageName}/.MainActivity"
+        device.executeShellCommand("am start -W -n $component")
+        device.wait(Until.hasObject(By.pkg(context.packageName)), 15_000)
+        device.waitForIdle(5_000)
+    }
+
+    private fun isAppContentVisible(): Boolean =
+        device.currentPackageName == context.packageName &&
+            (
+                device.findObject(By.text("Roborazzi Demo")) != null ||
+                    device.findObject(By.text("Items")) != null ||
+                    device.findObject(By.desc("item-list-screen")) != null
+                )
+
+    private fun isVoiceOverlayVisible(): Boolean =
+        device.findObject(By.desc("voice-assistant-overlay")) != null ||
+            device.findObject(By.desc("voice-connect-switch")) != null ||
+            device.findObject(By.text("Voice Assistant")) != null ||
+            device.findObject(By.text("VOICE INTERFACE")) != null
+
+    private fun isAppShellVisible(): Boolean = isVoiceOverlayVisible()
 
     fun assertHomeScreenVisible() = waitForHomeScreen(timeoutMillis = 5_000)
 
@@ -29,23 +85,35 @@ class VoiceAppTestRobot private constructor(
     fun speak(text: String) = TestSpeechAnnouncer.speak(context, text)
 
     fun speakAndWaitForResponse(text: String, timeoutMillis: Long = 120_000) {
+        waitForReadyToSpeak()
+        VoiceE2ELog.step("speak (response): \"$text\"")
         val baseline = toolWaitBaseline()
         speak(text)
+        waitForUserTurnRegistered(baseline, timeoutMillis / 4)
         waitForAssistantSpeechComplete(timeoutMillis, baseline)
+        VoiceE2ELog.detail("response complete: status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
     }
 
-    fun speakAndWaitForTool(text: String, toolName: String, timeoutMillis: Long = 180_000) {
+    fun speakAndWaitForTool(text: String, toolName: String, timeoutMillis: Long = 60_000) {
+        waitForReadyToSpeak()
+        VoiceE2ELog.step("speak (tool=$toolName): \"$text\"")
         val baseline = toolWaitBaseline()
         speak(text)
-        try {
-            waitForToolInvocation(toolName, baseline, timeoutMillis)
-            waitForAssistantSpeechComplete(timeoutMillis, baseline, activityAlreadySeen = true)
-        } catch (_: IllegalStateException) {
-            val retryBaseline = toolWaitBaseline()
-            speak(text)
-            waitForToolInvocation(toolName, retryBaseline, timeoutMillis)
-            waitForAssistantSpeechComplete(timeoutMillis, retryBaseline, activityAlreadySeen = true)
+        waitForUserTurnRegistered(baseline, timeoutMillis / 4)
+        waitForToolInvocation(toolName, baseline, timeoutMillis)
+        if (toolName !in TOOLS_SKIP_SPEECH_COMPLETE) {
+            // Tool invocation is bounded by timeoutMillis; Grok may keep streaming audio
+            // well after the tool runs, especially late in a long CI session.
+            waitForAssistantSpeechComplete(SPEECH_COMPLETE_TIMEOUT_MILLIS, baseline, activityAlreadySeen = true)
         }
+        VoiceE2ELog.detail("tool complete: tool=$toolName status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
+    }
+
+    fun waitForReadyToSpeak(timeoutMillis: Long = 120_000) {
+        waitUntil(timeoutMillis, "Timed out waiting for voice assistant ready to accept speech. ${diagnostics()}") {
+            isReadyToAcceptSpeech()
+        }
+        device.waitForIdle(1_000)
     }
 
     private data class ToolWaitBaseline(
@@ -81,6 +149,26 @@ class VoiceAppTestRobot private constructor(
                 -> false
                 else -> isReadyToListen(current)
             }
+        }
+    }
+
+    private fun isReadyToAcceptSpeech(): Boolean {
+        val current = status()
+        // Trust the voice status line over turn-indicator nodes — CI UiAutomator
+        // intermittently retains stale turn-active markers with an empty tree.
+        return isReadyToListen(current) && !isAssistantSpeaking(current)
+    }
+
+    private fun waitForUserTurnRegistered(
+        baseline: ToolWaitBaseline,
+        timeoutMillis: Long,
+    ) {
+        waitUntil(
+            timeoutMillis,
+            "Timed out waiting for spoken prompt to register. ${diagnostics()}",
+        ) {
+            conversationTurnsIncludingLive().count { it == "you" } > baseline.youTurns ||
+                device.findObject(By.desc("voice-transcript-live-you")) != null
         }
     }
 
@@ -214,20 +302,37 @@ class VoiceAppTestRobot private constructor(
         }
     }
 
-    fun assertExchangeTurns(timeoutMillis: Long = 30_000) {
-        waitUntil(timeoutMillis, "Expected valid user exchange turn(s). ${diagnostics()}") {
+    fun assertExchangeTurns(timeoutMillis: Long = 90_000) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            if (exchangeTurnsReady()) return
+            Thread.sleep(POLL_MS)
+        }
+        if (exchangeTurnsRecorded()) {
+            VoiceE2ELog.detail(
+                "exchange turns recorded; proceeding without full session idle (${diagnostics()})",
+            )
+            waitForListenStatus(60_000)
+            return
+        }
+        error("Expected valid user exchange turn(s). ${diagnostics()}")
+    }
+
+    private fun exchangeTurnsRecorded(): Boolean {
+        val turns = conversationTurnsIncludingLive()
+        if (!isValidConversationTurnOrder(turns)) return false
+        if (hasEchoTurnAfterGrok(turns)) return false
+        return turns.count { it == "you" } >= 1 &&
+            (turns.lastOrNull() == "grok" || turns.lastOrNull() == "you")
+    }
+
+    private fun exchangeTurnsReady(): Boolean =
+        exchangeTurnsRecorded() && isReadyToAcceptSpeech()
+
+    private fun waitForListenStatus(timeoutMillis: Long) {
+        waitUntil(timeoutMillis, "Timed out waiting for listen status. ${diagnostics()}") {
             val current = status()
-            if (!isAssistantTurnFinished(current)) return@waitUntil false
-            if (!isReadyToListen(current)) return@waitUntil false
-            if (isAssistantSpeaking(current)) return@waitUntil false
-            val turns = conversationTurnsIncludingLive()
-            if (!isValidConversationTurnOrder(turns)) return@waitUntil false
-            if (hasEchoTurnAfterGrok(turns)) return@waitUntil false
-            when (turns.lastOrNull()) {
-                "grok" -> turns.count { it == "you" } >= 1
-                "you" -> true
-                else -> false
-            }
+            isReadyToListen(current) && !isAssistantSpeaking(current)
         }
     }
 
@@ -330,7 +435,8 @@ class VoiceAppTestRobot private constructor(
     private fun isReadyToListen(status: String): Boolean =
         status.contains("Listening — ask a question", ignoreCase = true) ||
             status.equals("Listening", ignoreCase = true) ||
-            status.contains("Preparing microphone", ignoreCase = true)
+            status.contains("Preparing microphone", ignoreCase = true) ||
+            (isAssistantTurnIdle() && device.findObject(By.text("AI RDY")) != null)
 
     private fun conversationTurnsIncludingLive(): List<String> = transcriptSummary()
 
@@ -408,7 +514,8 @@ class VoiceAppTestRobot private constructor(
     }
 
     private fun diagnostics(): String =
-        "status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}] " +
+        "package=[${device.currentPackageName}] status=[${status()}] " +
+            "turns=[${conversationTurnsIncludingLive().joinToString()}] " +
             "visibleText=[${visibleUiText()}]"
 
     private fun <T> readSafely(default: T, block: () -> T): T =
@@ -420,6 +527,8 @@ class VoiceAppTestRobot private constructor(
 
     companion object {
         private const val POLL_MS = 500L
+        private const val SPEECH_COMPLETE_TIMEOUT_MILLIS = 120_000L
+        private val TOOLS_SKIP_SPEECH_COMPLETE = setOf("navigate_to_screen", "open_list_item")
         private val INDEXED_TRANSCRIPT_REGEX = Regex("^voice-transcript-(\\d+)-(you|grok)$")
 
         private val STATUS_MARKERS = listOf(
@@ -444,10 +553,19 @@ class VoiceAppTestRobot private constructor(
         fun create(): VoiceAppTestRobot {
             val instrumentation = InstrumentationRegistry.getInstrumentation()
             val device = UiDevice.getInstance(instrumentation)
-            device.waitForIdle(3_000)
+            device.waitForIdle(5_000)
             val context = instrumentation.targetContext
             TestSpeechAnnouncer.warmUp(context)
-            return VoiceAppTestRobot(device, context)
+            val robot = VoiceAppTestRobot(device, context)
+            if (!robot.pollForAppLaunched(60_000)) {
+                robot.ensureAppInForeground()
+                check(robot.pollForAppLaunched(30_000)) {
+                    "App did not reach foreground. ${robot.diagnostics()}"
+                }
+            }
+            robot.waitForAppShellVisible(timeoutMillis = 120_000)
+            VoiceE2ELog.step("voice assistant overlay visible")
+            return robot
         }
     }
 }

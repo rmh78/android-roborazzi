@@ -49,6 +49,8 @@ class GrokVoiceSession(
     private var sessionConfigured = false
     private var sessionUpdateSent = false
     private var responseWatchdogJob: Job? = null
+    private var playbackFinalizeJob: Job? = null
+    private var respondingStallWatchdogJob: Job? = null
     private var activeResponseId: String? = null
     private var audioChunksSent = 0
     private var activeResponseHadAudio = false
@@ -409,6 +411,7 @@ class GrokVoiceSession(
                 }
                 VoiceLog.i("Session", "Response started (id=$activeResponseId)")
                 listener.onStatusChanged("Grok is responding…")
+                scheduleRespondingStallWatchdog(socket)
             }
             "response.output_audio.delta",
             "response.audio.delta",
@@ -443,6 +446,7 @@ class GrokVoiceSession(
                 listener.onFunctionCall(name, arguments, callId)
             }
             "response.done" -> {
+                clearRespondingStallWatchdog()
                 clearResponseWatchdog()
                 val responseId = activeResponseId
                 val hadAudio = activeResponseHadAudio
@@ -482,18 +486,7 @@ class GrokVoiceSession(
                             toolFollowupResponsePending = false
                             toolFollowupResponseId = null
                         }
-                        val finalizeResponse = {
-                            suppressUserTranscripts = false
-                            listener.onStatusChanged(
-                                if (hadAudio) "Listening — ask a question" else "Listening",
-                            )
-                            resumeMicAfterInject(socket, hadAudio)
-                        }
-                        if (hadAudio || !audioPlayback.isIdle()) {
-                            audioPlayback.whenIdle(finalizeResponse)
-                        } else {
-                            finalizeResponse()
-                        }
+                        resumeListeningAfterResponse(socket, hadAudio)
                     }
                 }
             }
@@ -572,6 +565,74 @@ class GrokVoiceSession(
      * Guards only client-initiated [response.create] turns until [response.created] arrives.
      * Not used for server-VAD commits — the server owns that lifecycle.
      */
+    private fun scheduleRespondingStallWatchdog(socket: WebSocket) {
+        respondingStallWatchdogJob?.cancel()
+        respondingStallWatchdogJob = scope.launch {
+            delay(RESPONDING_STALL_TIMEOUT_MS)
+            val stalledResponseId = activeResponseId ?: return@launch
+            VoiceLog.w(
+                "Session",
+                "Responding stall watchdog fired (response_id=$stalledResponseId)",
+            )
+            VoiceLog.clientEvent("response.cancel (stall watchdog, response_id=$stalledResponseId)")
+            socket.send(
+                JSONObject().apply {
+                    put("type", "response.cancel")
+                    put("response_id", stalledResponseId)
+                }.toString(),
+            )
+            playbackFinalizeJob?.cancel()
+            playbackFinalizeJob = null
+            audioPlayback.stop()
+            activeResponseId = null
+            activeResponseHadAudio = false
+            deferMicResumeForClientTool = false
+            toolFollowupResponsePending = false
+            toolFollowupResponseId = null
+            suppressUserTranscripts = false
+            listener.onStatusChanged("Listening — ask a question")
+            resumeMicAfterInject(socket, hadAudio = false)
+        }
+    }
+
+    private fun clearRespondingStallWatchdog() {
+        respondingStallWatchdogJob?.cancel()
+        respondingStallWatchdogJob = null
+    }
+
+    private fun resumeListeningAfterResponse(socket: WebSocket, hadAudio: Boolean) {
+        playbackFinalizeJob?.cancel()
+        playbackFinalizeJob = null
+        var finalized = false
+        fun finalizeResponse() {
+            if (finalized) return
+            finalized = true
+            playbackFinalizeJob?.cancel()
+            playbackFinalizeJob = null
+            suppressUserTranscripts = false
+            listener.onStatusChanged(
+                if (hadAudio) "Listening — ask a question" else "Listening",
+            )
+            resumeMicAfterInject(socket, hadAudio)
+        }
+        if (hadAudio || !audioPlayback.isIdle()) {
+            audioPlayback.whenIdle { finalizeResponse() }
+            playbackFinalizeJob = scope.launch {
+                delay(PLAYBACK_FINALIZE_TIMEOUT_MS)
+                if (!finalized) {
+                    VoiceLog.w(
+                        "Session",
+                        "Playback finalize watchdog fired — forcing listen state",
+                    )
+                    audioPlayback.stop()
+                    finalizeResponse()
+                }
+            }
+        } else {
+            finalizeResponse()
+        }
+    }
+
     private fun scheduleResponseWatchdog(socket: WebSocket, kind: WatchdogKind) {
         responseWatchdogJob?.cancel()
         val timeoutMs = when (kind) {
@@ -622,6 +683,8 @@ class GrokVoiceSession(
     companion object {
         private const val RESPONSE_CREATE_TIMEOUT_MS = 20_000L
         private const val TOOL_FOLLOWUP_TIMEOUT_MS = 60_000L
+        private const val PLAYBACK_FINALIZE_TIMEOUT_MS = 45_000L
+        private const val RESPONDING_STALL_TIMEOUT_MS = 45_000L
         private const val AUDIO_CHUNK_LOG_INTERVAL = 50
         private const val PROCESSING_MIC_PULSE_MS = 1_500L
 
