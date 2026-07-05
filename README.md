@@ -78,20 +78,24 @@ For the full report, download the `roborazzi-diffs` artifact from the failed run
 ```
 app/
 ├── src/screenshots/                # Golden images (committed)
-├── src/main/                       # Compose UI + navigation
-└── src/test/
-    ├── RoborazziComposeTest.kt     # Shared test base class
-    ├── GoldenImages.kt             # Screenshot name constants
-    └── *Test.kt                    # Per-screen and navigation tests
+├── src/main/                       # Compose UI, navigation, voice session
+├── src/test/                       # Roborazzi JVM screenshot tests
+│   ├── RoborazziComposeTest.kt     # Shared test base class
+│   ├── GoldenImages.kt             # Screenshot name constants
+│   └── *Test.kt                    # Per-screen and navigation tests
+└── src/androidTest/                # Instrumented voice E2E (emulator + live API)
+    └── voice/
+        ├── VoiceAppIntegrationTest.kt
+        └── support/                # UiAutomator robot + TTS test harness
 ```
 
-## Voice navigation (Grok Voice Agent API)
+## Voice assistant (Grok Voice Agent API)
 
-The app supports hands-free navigation and screen description via the [xAI Voice Agent API](https://docs.x.ai/developers/model-capabilities/audio/voice-agent).
+The app includes a voice overlay for hands-free navigation, screen description, and web search via the [xAI Voice Agent API](https://docs.x.ai/developers/model-capabilities/audio/voice-agent).
 
 ### Setup
 
-1. Set your API key before building:
+1. Set your API key before building (baked into `BuildConfig` at compile time):
 
 ```bash
 export XAI_API_KEY=your-key-here
@@ -99,15 +103,51 @@ export XAI_API_KEY=your-key-here
 ```
 
 2. Run on an emulator or device with microphone access.
-3. Grant **Record audio** when prompted.
-4. Toggle **Connect** on the voice overlay at the bottom of the screen.
-5. Speak naturally — for example:
+3. Toggle **Connect** on the voice overlay and grant **Record audio** when prompted.
+4. Grok greets you, then always-on listening starts (server VAD).
+5. Ask naturally — no need to name tools. For example:
+   - "Describe the screen for me"
+   - "What is the weather in Munich?"
    - "Go to the items list"
-   - "Open item 3"
+   - "Scroll to item 10"
    - "Go back"
-   - "What is on this screen?"
 
-The overlay shows live captions for your speech and Grok's spoken replies. Navigation and screen reading use Voice API function calling (`navigate_to_screen`, `navigate_back`, `open_list_item`, `describe_screen`).
+The overlay shows live **You** / **Grok** transcript turns, mic level, status, and the last tool invoked.
+
+### Voice tools
+
+| Tool | Where it runs | Purpose |
+|---|---|---|
+| `web_search` | xAI server | Weather, news, and other live web facts |
+| `navigate_to_screen` | App | Home, items list, item detail (valid or not-found) |
+| `navigate_back` | App | Pop navigation stack |
+| `open_list_item` | App | Scroll list to a 1-based item index |
+| `describe_screen` | App | Read structured UI tree for the current screen |
+
+Session config uses `grok-voice-latest`, voice `eve`, server VAD, and an **Answer brief.** instruction for short spoken replies.
+
+### Voice integration test (emulator)
+
+A single instrumented E2E test connects to the live API, exercises every nav screen and voice tool, validates conversation turn order (You → Grok), and disconnects. Requires `XAI_API_KEY`, a running emulator/device, and network.
+
+```bash
+adb shell am force-stop com.example.roborazzidemo
+
+./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.example.roborazzidemo.voice.VoiceAppIntegrationTest
+```
+
+The test uses emulator TTS plus debug `VOICE_SPOKEN` injects to simulate user speech. Typical runtime is 2–5 minutes.
+
+Optional: disable TTS playback (inject only) with `-Pandroid.testInstrumentationRunnerArguments.disableTestSpeechPlayback=true`.
+
+### Debug broadcasts (debug builds)
+
+| Action | Purpose |
+|---|---|
+| `com.example.roborazzidemo.VOICE_SPOKEN` | Inject a spoken user turn (`text` extra) |
+| `com.example.roborazzidemo.VOICE_TEXT` | Inject a text turn (direct-speech debug path) |
+| `com.example.roborazzidemo.VOICE_DISCONNECT` | Disconnect the voice session |
 
 ## License
 

@@ -5,17 +5,22 @@ import org.json.JSONObject
 
 object VoiceSessionUpdateBuilder {
     val toolsSessionInstructions: String = """
+        Answer brief.
         You are a voice assistant inside a demo Android app with screens: home, items list, and item detail.
-        Use tools for every navigation action and every question about what is on screen.
+        You have web_search for current information from the internet (weather, news, sports, prices, etc.).
+        For navigation and on-screen questions, use the app function tools.
         Never guess screen content — call describe_screen first when the user asks what they see.
-        Keep spoken answers short and direct.
+        Spoken replies: one or two short sentences unless the user asks for more detail.
     """.trimIndent()
 
     val directSpeechInstructions: String = """
+        Answer brief.
         You are a voice assistant inside a demo Android app with screens: home, items list, and item detail.
-        The user is asking a navigation or screen question via text. Answer briefly in spoken audio only.
-        Do not call any tools or functions. Describe what you would do or what is on screen in one short sentence.
+        The user is asking a navigation or screen question via text. Reply in spoken audio only.
+        Do not call any tools or functions. One short sentence.
     """.trimIndent()
+
+    val initialGreetingInstructions: String = "Say exactly: Hello"
 
     fun withTools(): JSONObject = sessionUpdateJson(
         instructions = toolsSessionInstructions,

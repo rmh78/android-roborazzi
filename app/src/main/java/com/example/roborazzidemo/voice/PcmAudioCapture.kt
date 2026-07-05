@@ -1,33 +1,89 @@
 package com.example.roborazzidemo.voice
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Base64
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.sqrt
 
-class PcmAudioCapture {
+class PcmAudioCapture(
+    private val context: Context,
+) {
     private var audioRecord: AudioRecord? = null
-    private var captureJob: Job? = null
+    private var recordingThread: Thread? = null
+
+    @Volatile
+    private var isCapturing = false
+
+    @Volatile
+    private var activeSource: Int? = null
 
     private val _audioLevel = MutableStateFlow(0f)
     val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
 
-    fun start(
-        scope: CoroutineScope,
-        onChunk: (String) -> Unit,
-    ) {
+    fun start(onChunk: (String) -> Unit, onFailure: (String) -> Unit = {}) {
         stop()
+        isCapturing = true
+        recordingThread = Thread(
+            {
+                val sources = VoiceDeviceHints.preferredCaptureSources()
+                var lastError: String? = null
+
+                for (source in sources) {
+                    if (!isCapturing) return@Thread
+                    releaseRecord()
+
+                    val initError = openCapture(source)
+                    if (initError != null) {
+                        lastError = initError
+                        VoiceLog.w("Mic", "Capture source ${sourceName(source)} failed: $initError")
+                        continue
+                    }
+
+                    val peakLevel = captureLoop(source, onChunk)
+                    if (peakLevel > SILENCE_LEVEL_THRESHOLD) {
+                        return@Thread
+                    }
+
+                    VoiceLog.w(
+                        "Mic",
+                        "No input on ${sourceName(source)} (peak=${"%.3f".format(peakLevel)}) — trying next source",
+                    )
+                    lastError = "No microphone input on ${sourceName(source)}"
+                }
+
+                isCapturing = false
+                _audioLevel.value = 0f
+                val message = lastError ?: "No microphone capture source available"
+                VoiceLog.e("Mic", message)
+                onFailure(
+                    if (VoiceDeviceHints.isLikelyEmulator()) {
+                        "$message. On the emulator, enable host mic: Emulator menu → Microphone → " +
+                            "\"Virtual microphone uses host audio input\"."
+                    } else {
+                        message
+                    },
+                )
+            },
+            "voice-mic-capture",
+        ).also { it.start() }
+    }
+
+    private fun openCapture(source: Int): String? {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            return "Microphone permission not granted"
+        }
 
         val minBuffer = AudioRecord.getMinBufferSize(
             VoiceConstants.SAMPLE_RATE_HZ,
@@ -35,11 +91,11 @@ class PcmAudioCapture {
             AudioFormat.ENCODING_PCM_FLOAT,
         )
         if (minBuffer <= 0) {
-            error("Microphone does not support ${VoiceConstants.SAMPLE_RATE_HZ}Hz PCM_FLOAT capture")
+            return "Microphone does not support ${VoiceConstants.SAMPLE_RATE_HZ}Hz PCM_FLOAT capture"
         }
 
         val record = AudioRecord.Builder()
-            .setAudioSource(MediaRecorder.AudioSource.MIC)
+            .setAudioSource(source)
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setSampleRate(VoiceConstants.SAMPLE_RATE_HZ)
@@ -52,80 +108,113 @@ class PcmAudioCapture {
 
         if (record.state != AudioRecord.STATE_INITIALIZED) {
             record.release()
-            error("AudioRecord failed to initialize")
+            return "AudioRecord failed to initialize"
+        }
+
+        record.startRecording()
+        if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+            record.release()
+            return "AudioRecord failed to enter RECORDSTATE_RECORDING"
         }
 
         audioRecord = record
-        record.startRecording()
+        activeSource = source
         VoiceLog.i(
             "Mic",
             "Capture started (rate=${VoiceConstants.SAMPLE_RATE_HZ}Hz, chunk=${CHUNK_DURATION_MS}ms, " +
-                "encoding=PCM_FLOAT)",
+                "source=${sourceName(source)}, encoding=PCM_FLOAT)",
         )
+        return null
+    }
 
-        captureJob = scope.launch(Dispatchers.IO) {
-            val readBuffer = FloatArray(READ_BUFFER_SAMPLES)
-            val pendingChunks = mutableListOf<FloatArray>()
-            var pendingSamples = 0
-            var chunksSent = 0
+    private fun captureLoop(source: Int, onChunk: (String) -> Unit): Float {
+        val record = audioRecord ?: return 0f
+        val readBuffer = FloatArray(READ_BUFFER_SAMPLES)
+        val pendingChunks = mutableListOf<FloatArray>()
+        var pendingSamples = 0
+        var chunksSent = 0
+        var peakLevel = 0f
 
-            while (isActive) {
-                val read = record.read(readBuffer, 0, readBuffer.size, AudioRecord.READ_BLOCKING)
-                when {
-                    read > 0 -> {
-                        val samples = readBuffer.copyOf(read)
-                        _audioLevel.value = calculateLevel(samples)
-                        pendingChunks.add(samples)
-                        pendingSamples += read
+        while (isCapturing) {
+            val read = record.read(readBuffer, 0, readBuffer.size, AudioRecord.READ_BLOCKING)
+            when {
+                read > 0 -> {
+                    val samples = readBuffer.copyOf(read)
+                    val level = calculateLevel(samples)
+                    _audioLevel.value = level
+                    peakLevel = maxOf(peakLevel, level)
+                    pendingChunks.add(samples)
+                    pendingSamples += read
 
-                        while (pendingSamples >= CHUNK_SIZE_SAMPLES) {
-                            val chunk = FloatArray(CHUNK_SIZE_SAMPLES)
-                            var offset = 0
-                            while (offset < CHUNK_SIZE_SAMPLES && pendingChunks.isNotEmpty()) {
-                                val buffer = pendingChunks.first()
-                                val needed = CHUNK_SIZE_SAMPLES - offset
-                                if (buffer.size <= needed) {
-                                    System.arraycopy(buffer, 0, chunk, offset, buffer.size)
-                                    offset += buffer.size
-                                    pendingSamples -= buffer.size
-                                    pendingChunks.removeAt(0)
-                                } else {
-                                    System.arraycopy(buffer, 0, chunk, offset, needed)
-                                    pendingChunks[0] = buffer.copyOfRange(needed, buffer.size)
-                                    offset += needed
-                                    pendingSamples -= needed
-                                }
-                            }
-                            onChunk(float32ToPcm16Base64(chunk))
-                            chunksSent++
-                            if (chunksSent == 1 || chunksSent % MIC_LEVEL_LOG_INTERVAL == 0) {
-                                VoiceLog.d(
-                                    "Mic",
-                                    "level=${"%.2f".format(_audioLevel.value)} chunks_sent=$chunksSent",
-                                )
+                    while (pendingSamples >= CHUNK_SIZE_SAMPLES) {
+                        val chunk = FloatArray(CHUNK_SIZE_SAMPLES)
+                        var offset = 0
+                        while (offset < CHUNK_SIZE_SAMPLES && pendingChunks.isNotEmpty()) {
+                            val buffer = pendingChunks.first()
+                            val needed = CHUNK_SIZE_SAMPLES - offset
+                            if (buffer.size <= needed) {
+                                System.arraycopy(buffer, 0, chunk, offset, buffer.size)
+                                offset += buffer.size
+                                pendingSamples -= buffer.size
+                                pendingChunks.removeAt(0)
+                            } else {
+                                System.arraycopy(buffer, 0, chunk, offset, needed)
+                                pendingChunks[0] = buffer.copyOfRange(needed, buffer.size)
+                                offset += needed
+                                pendingSamples -= needed
                             }
                         }
+                        onChunk(float32ToPcm16Base64(chunk))
+                        chunksSent++
+                        if (chunksSent == 1 || chunksSent % MIC_LEVEL_LOG_INTERVAL == 0) {
+                            VoiceLog.d(
+                                "Mic",
+                                "level=${"%.2f".format(level)} peak=${"%.2f".format(peakLevel)} " +
+                                    "chunks_sent=$chunksSent source=${sourceName(source)}",
+                            )
+                        }
+                        if (chunksSent >= SILENCE_RETRY_CHUNK_COUNT && peakLevel <= SILENCE_LEVEL_THRESHOLD) {
+                            return peakLevel
+                        }
                     }
-                    read < 0 -> error("AudioRecord.read failed with code $read")
+                }
+                read < 0 -> {
+                    VoiceLog.e("Mic", "AudioRecord.read failed with code $read")
+                    return peakLevel
                 }
             }
         }
+        return peakLevel
     }
 
-    fun isCapturing(): Boolean = captureJob?.isActive == true
+    fun isCapturing(): Boolean = isCapturing
 
     fun stop() {
-        if (audioRecord != null) {
-            VoiceLog.i("Mic", "Capture stopped")
-        }
-        captureJob?.cancel()
-        captureJob = null
-        audioRecord?.run {
-            stop()
-            release()
-        }
-        audioRecord = null
+        isCapturing = false
+        recordingThread?.join(500)
+        recordingThread = null
+        releaseRecord()
         _audioLevel.value = 0f
+    }
+
+    private fun releaseRecord() {
+        val record = audioRecord ?: return
+        val source = activeSource
+        audioRecord = null
+        activeSource = null
+        VoiceLog.i("Mic", "Capture stopped (source=${source?.let(::sourceName)})")
+        try {
+            if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                record.stop()
+            }
+        } catch (e: IllegalStateException) {
+            VoiceLog.w("Mic", "AudioRecord.stop skipped: ${e.message}")
+        }
+        try {
+            record.release()
+        } catch (e: IllegalStateException) {
+            VoiceLog.w("Mic", "AudioRecord.release skipped: ${e.message}")
+        }
     }
 
     private fun calculateLevel(samples: FloatArray): Float {
@@ -134,7 +223,8 @@ class PcmAudioCapture {
         for (sample in samples) {
             sum += (sample * sample).toDouble()
         }
-        return sqrt(sum / samples.size).toFloat().coerceIn(0f, 1f)
+        val rms = sqrt(sum / samples.size).toFloat()
+        return (rms * LEVEL_UI_GAIN).coerceIn(0f, 1f)
     }
 
     private fun float32ToPcm16Base64(samples: FloatArray): String {
@@ -148,11 +238,21 @@ class PcmAudioCapture {
         return Base64.encodeToString(bytes, Base64.NO_WRAP)
     }
 
+    private fun sourceName(source: Int): String = when (source) {
+        MediaRecorder.AudioSource.MIC -> "MIC"
+        MediaRecorder.AudioSource.VOICE_COMMUNICATION -> "VOICE_COMMUNICATION"
+        MediaRecorder.AudioSource.DEFAULT -> "DEFAULT"
+        else -> source.toString()
+    }
+
     companion object {
         private const val CHUNK_DURATION_MS = 100
         private const val READ_BUFFER_SAMPLES = 4096
         private const val CHUNK_SIZE_SAMPLES =
             VoiceConstants.SAMPLE_RATE_HZ * CHUNK_DURATION_MS / 1000
         private const val MIC_LEVEL_LOG_INTERVAL = 10
+        private const val LEVEL_UI_GAIN = 10f
+        private const val SILENCE_LEVEL_THRESHOLD = 0.01f
+        private const val SILENCE_RETRY_CHUNK_COUNT = 30
     }
 }

@@ -5,6 +5,7 @@ import org.json.JSONObject
 
 object VoiceToolDefinitions {
     fun toolsJson(): JSONArray = JSONArray().apply {
+        put(JSONObject().put("type", "web_search"))
         put(
             JSONObject().apply {
                 put("type", "function")
@@ -101,6 +102,4 @@ object VoiceToolDefinitions {
             },
         )
     }
-
-    fun sessionUpdateJson(): JSONObject = VoiceSessionUpdateBuilder.withTools()
 }

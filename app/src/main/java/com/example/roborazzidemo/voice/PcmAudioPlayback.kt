@@ -31,16 +31,35 @@ class PcmAudioPlayback {
         synchronized(lock) {
             playbackQueue.clear()
             isPlaying = false
+            releaseTrackLocked()
         }
-        audioTrack?.run {
-            stop()
-            release()
-        }
-        audioTrack = null
         if (chunksPlayed > 0) {
             VoiceLog.i("Playback", "Stopped (chunks_played=$chunksPlayed)")
         }
         chunksPlayed = 0
+    }
+
+    fun isIdle(): Boolean = synchronized(lock) {
+        !isPlaying && playbackQueue.isEmpty()
+    }
+
+    fun whenIdle(onIdle: () -> Unit) {
+        Thread(
+            {
+                while (true) {
+                    synchronized(lock) {
+                        if (!isPlaying && playbackQueue.isEmpty()) {
+                            releaseTrackLocked()
+                            VoiceLog.d("Playback", "Playback idle — ready for microphone capture")
+                            onIdle()
+                            return@Thread
+                        }
+                    }
+                    Thread.sleep(PLAYBACK_IDLE_POLL_MS)
+                }
+            },
+            "voice-playback-idle",
+        ).start()
     }
 
     private fun playNextChunk() {
@@ -55,11 +74,15 @@ class PcmAudioPlayback {
             }
 
             val samples = chunk ?: continue
-            ensureTrack()
-            val track = audioTrack ?: return
+            val track = synchronized(lock) {
+                ensureTrackLocked()
+                audioTrack
+            } ?: return
+
             val written = track.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
             if (written < 0) {
                 VoiceLog.e("Playback", "AudioTrack.write failed with code $written")
+                synchronized(lock) { isPlaying = false }
                 return
             }
             chunksPlayed++
@@ -72,7 +95,7 @@ class PcmAudioPlayback {
         }
     }
 
-    private fun ensureTrack() {
+    private fun ensureTrackLocked() {
         if (audioTrack != null) return
         val minBuffer = AudioTrack.getMinBufferSize(
             VoiceConstants.SAMPLE_RATE_HZ,
@@ -106,6 +129,23 @@ class PcmAudioPlayback {
             }
     }
 
+    private fun releaseTrackLocked() {
+        val track = audioTrack ?: return
+        audioTrack = null
+        try {
+            if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                track.stop()
+            }
+        } catch (e: IllegalStateException) {
+            VoiceLog.w("Playback", "AudioTrack.stop skipped: ${e.message}")
+        }
+        try {
+            track.release()
+        } catch (e: IllegalStateException) {
+            VoiceLog.w("Playback", "AudioTrack.release skipped: ${e.message}")
+        }
+    }
+
     private fun base64Pcm16ToFloat32(base64: String): FloatArray {
         val bytes = Base64.decode(base64, Base64.NO_WRAP)
         val shortBuffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
@@ -118,5 +158,6 @@ class PcmAudioPlayback {
 
     companion object {
         private const val PLAYBACK_LOG_INTERVAL = 25
+        private const val PLAYBACK_IDLE_POLL_MS = 50L
     }
 }

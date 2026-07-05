@@ -27,6 +27,10 @@ class VoiceToolExecutor(
                 scrollController.scrollToOneBasedIndex(index)
             }
             "describe_screen" -> ScreenContentProvider.dumpScreenJson()
+            "web_search", "x_search", "file_search" -> {
+                VoiceLog.w("Tool", "Unexpected client dispatch for server-executed tool: $name")
+                """{"status":"completed"}"""
+            }
             else -> "Unknown tool: $name"
         }
         VoiceLog.i("Tool", "$name → ${output.take(200)}")

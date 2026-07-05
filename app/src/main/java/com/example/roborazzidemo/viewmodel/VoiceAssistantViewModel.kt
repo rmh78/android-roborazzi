@@ -1,5 +1,6 @@
 package com.example.roborazzidemo.viewmodel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -27,7 +28,6 @@ enum class TranscriptRole {
 
 data class VoiceUiState(
     val isConnected: Boolean = false,
-    val isSpeakActive: Boolean = false,
     val status: String = "Disconnected",
     val audioLevel: Float = 0f,
     val liveUserText: String = "",
@@ -42,17 +42,12 @@ data class VoiceUiState(
 class VoiceAssistantViewModel(
     private val apiKey: String,
     private val toolExecutor: VoiceToolExecutor,
+    private val applicationContext: Context,
 ) : ViewModel(), VoiceSessionListener {
     private val _uiState = MutableStateFlow(VoiceUiState(hasApiKey = apiKey != "no-api-key"))
     val uiState: StateFlow<VoiceUiState> = _uiState.asStateFlow()
 
     private var session: GrokVoiceSession? = null
-
-    init {
-        viewModelScope.launch {
-            // audio level is wired after connect
-        }
-    }
 
     fun setMicrophonePermissionGranted(granted: Boolean) {
         VoiceLog.ui("Microphone permission: $granted")
@@ -77,11 +72,16 @@ class VoiceAssistantViewModel(
             apiKey = apiKey,
             scope = viewModelScope,
             listener = this,
+            applicationContext = applicationContext,
         )
         session = voiceSession
         VoiceDebugBridge.sendTextCommand = { text ->
             VoiceLog.i("Debug", "Forwarding text to session: $text")
             voiceSession.sendTextMessage(text)
+        }
+        VoiceDebugBridge.sendSpokenUserCommand = { text ->
+            VoiceLog.i("Debug", "Forwarding spoken user message to session: $text")
+            voiceSession.sendSpokenUserMessage(text)
         }
         VoiceDebugBridge.disconnectCommand = { disconnect() }
         voiceSession.connect()
@@ -93,22 +93,14 @@ class VoiceAssistantViewModel(
         }
     }
 
-    fun setSpeakActive(active: Boolean) {
-        VoiceLog.ui("Speak ${if (active) "on" else "off"}")
-        _uiState.update { it.copy(isSpeakActive = active) }
-        session?.setSpeakActive(active)
-    }
-
     fun disconnect() {
         VoiceLog.ui("Disconnect requested")
-        VoiceDebugBridge.sendTextCommand = null
-        VoiceDebugBridge.disconnectCommand = null
+        clearDebugBridge()
         session?.disconnect()
         session = null
         _uiState.update {
             it.copy(
                 isConnected = false,
-                isSpeakActive = false,
                 status = "Disconnected",
                 audioLevel = 0f,
                 liveUserText = "",
@@ -122,23 +114,20 @@ class VoiceAssistantViewModel(
         _uiState.update {
             it.copy(
                 isConnected = true,
-                isSpeakActive = false,
-                status = "Connected — tap Speak",
+                status = "Grok is greeting you…",
                 errorMessage = null,
             )
         }
     }
 
-    override fun onSpeakTurnEnded() {
-        VoiceLog.ui("Speak turn ended")
-        _uiState.update {
-            it.copy(isSpeakActive = false, status = "Connected — tap Speak")
-        }
-    }
-
     override fun onStatusChanged(status: String) {
         VoiceLog.ui("Status → $status")
-        _uiState.update { it.copy(status = status) }
+        _uiState.update {
+            it.copy(
+                status = status,
+                errorMessage = if (status.equals("Error", ignoreCase = true)) it.errorMessage else null,
+            )
+        }
     }
 
     override fun onUserSpeechStarted() {
@@ -193,28 +182,49 @@ class VoiceAssistantViewModel(
 
     override fun onFunctionCall(name: String, arguments: JSONObject, callId: String) {
         VoiceLog.ui("Function call: $name (call_id=$callId, args=$arguments)")
-        _uiState.update { it.copy(lastToolName = name, status = "Running $name…") }
+        updateActiveTool(name)
         viewModelScope.launch {
             val output = toolExecutor.execute(name, arguments)
             session?.sendToolResult(output, callId)
         }
     }
 
-    override fun onError(message: String) {
-        VoiceLog.e("UI", "Error: $message")
-        _uiState.update { it.copy(errorMessage = message, status = "Error") }
+    override fun onServerToolExecuted(name: String) {
+        VoiceLog.ui("Server tool executed: $name")
+        updateActiveTool(name)
     }
 
-    override fun onDisconnected() {
-        VoiceLog.ui("Disconnected")
-        VoiceDebugBridge.sendTextCommand = null
-        VoiceDebugBridge.disconnectCommand = null
+    private fun updateActiveTool(name: String) {
+        _uiState.update { it.copy(lastToolName = name, status = "Running $name…") }
+    }
+
+    override fun onError(message: String, recoverable: Boolean) {
+        VoiceLog.e("UI", "Error (recoverable=$recoverable): $message")
+        if (recoverable) {
+            _uiState.update { it.copy(errorMessage = message) }
+        } else {
+            _uiState.update {
+                it.copy(
+                    errorMessage = message,
+                    status = "Error",
+                    isConnected = false,
+                    audioLevel = 0f,
+                )
+            }
+            clearDebugBridge()
+            session = null
+        }
+    }
+
+    override fun onDisconnected(reason: String?) {
+        VoiceLog.ui("Disconnected${reason?.let { ": $it" }.orEmpty()}")
+        clearDebugBridge()
         _uiState.update {
             it.copy(
                 isConnected = false,
-                isSpeakActive = false,
                 status = "Disconnected",
                 audioLevel = 0f,
+                errorMessage = reason,
             )
         }
         session = null
@@ -225,13 +235,20 @@ class VoiceAssistantViewModel(
         super.onCleared()
     }
 
+    private fun clearDebugBridge() {
+        VoiceDebugBridge.sendTextCommand = null
+        VoiceDebugBridge.sendSpokenUserCommand = null
+        VoiceDebugBridge.disconnectCommand = null
+    }
+
     class Factory(
         private val apiKey: String,
         private val toolExecutor: VoiceToolExecutor,
+        private val applicationContext: Context,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return VoiceAssistantViewModel(apiKey, toolExecutor) as T
+            return VoiceAssistantViewModel(apiKey, toolExecutor, applicationContext) as T
         }
     }
 }

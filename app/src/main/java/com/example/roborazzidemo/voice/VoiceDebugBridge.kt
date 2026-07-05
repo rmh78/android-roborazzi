@@ -9,10 +9,19 @@ object VoiceDebugBridge {
     var sendTextCommand: ((String) -> Unit)? = null
 
     @Volatile
+    var sendSpokenUserCommand: ((String) -> Unit)? = null
+
+    @Volatile
     var disconnectCommand: (() -> Unit)? = null
 
     fun dispatch(text: String): Boolean {
         val handler = sendTextCommand ?: return false
+        handler(text)
+        return true
+    }
+
+    fun dispatchSpoken(text: String): Boolean {
+        val handler = sendSpokenUserCommand ?: return false
         handler(text)
         return true
     }

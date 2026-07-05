@@ -10,8 +10,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.rememberNavController
 import com.example.roborazzidemo.AppNavHost
@@ -33,10 +33,12 @@ fun VoiceAssistantRoot(
         val toolExecutor = remember(navigationHandler, scrollController) {
             VoiceToolExecutor(navigationHandler, scrollController)
         }
+        val applicationContext = LocalContext.current.applicationContext
         val viewModel: VoiceAssistantViewModel = viewModel(
             factory = VoiceAssistantViewModel.Factory(
                 apiKey = BuildConfig.XAI_API_KEY,
                 toolExecutor = toolExecutor,
+                applicationContext = applicationContext,
             ),
         )
 
@@ -67,13 +69,6 @@ fun VoiceAssistantRoot(
                     } else {
                         viewModel.disconnect()
                     }
-                },
-                onSpeakChange = { speak ->
-                    if (!hasRecordAudioPermission) {
-                        onRequestRecordAudioPermission()
-                        return@VoiceTranscriptOverlay
-                    }
-                    viewModel.setSpeakActive(speak)
                 },
                 modifier = Modifier.align(Alignment.BottomCenter),
             )

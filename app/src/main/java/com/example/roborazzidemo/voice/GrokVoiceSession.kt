@@ -1,6 +1,8 @@
 package com.example.roborazzidemo.voice
 
+import android.content.Context
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -22,18 +24,21 @@ interface VoiceSessionListener {
     fun onAssistantTranscriptDelta(delta: String)
     fun onAssistantTranscriptDone()
     fun onFunctionCall(name: String, arguments: JSONObject, callId: String)
-    fun onError(message: String)
-    fun onDisconnected()
-    fun onSpeakTurnEnded()
+    fun onServerToolExecuted(name: String)
+    /** @param recoverable when true the WebSocket stays open (typical API/mic errors). */
+    fun onError(message: String, recoverable: Boolean = true)
+    fun onDisconnected(reason: String? = null)
 }
 
 class GrokVoiceSession(
     private val apiKey: String,
     private val scope: CoroutineScope,
     private val listener: VoiceSessionListener,
+    applicationContext: Context,
 ) {
-    private val audioCapture = PcmAudioCapture()
+    private val audioCapture = PcmAudioCapture(applicationContext)
     private val audioPlayback = PcmAudioPlayback()
+    private val audioRoute = VoiceAudioRoute(applicationContext)
     private val micGate = MicCaptureGate()
     private var webSocket: WebSocket? = null
     private var sessionConfigured = false
@@ -44,7 +49,10 @@ class GrokVoiceSession(
     private var activeResponseHadAudio = false
     private var pendingDebugText: String? = null
     private var awaitingToolsRestore = false
-    private var speakActive = false
+    private var awaitingGreetingCompletion = false
+    private var deferMicResumeForClientTool = false
+    private var toolFollowupResponsePending = false
+    private var suppressUserTranscripts = false
 
     val audioLevel = audioCapture.audioLevel
 
@@ -63,14 +71,17 @@ class GrokVoiceSession(
         audioChunksSent = 0
         pendingDebugText = null
         awaitingToolsRestore = false
-        speakActive = false
+        awaitingGreetingCompletion = false
+        deferMicResumeForClientTool = false
+        toolFollowupResponsePending = false
+        suppressUserTranscripts = false
+        audioRoute.enterVoiceChat()
 
         VoiceLog.i("Session", "Connecting to ${VoiceConstants.REALTIME_URL}")
 
         val request = Request.Builder()
             .url(VoiceConstants.REALTIME_URL)
             .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("OpenAI-Beta", "realtime=v1")
             .build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -85,8 +96,10 @@ class GrokVoiceSession(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 VoiceLog.e("Session", "WebSocket failure (HTTP ${response?.code})", t)
-                listener.onError(t.message ?: "Connection failed")
-                cleanupConnection(notifyListener = true)
+                cleanupConnection(
+                    notifyListener = true,
+                    disconnectReason = t.message ?: "Connection failed",
+                )
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -96,17 +109,6 @@ class GrokVoiceSession(
         })
     }
 
-    fun setSpeakActive(active: Boolean) {
-        if (speakActive == active) return
-        speakActive = active
-        if (!sessionConfigured) return
-        if (active) {
-            startAudioCapture()
-        } else {
-            stopListening(notifyStatus = true)
-        }
-    }
-
     fun disconnect() {
         if (webSocket == null) return
         VoiceLog.i("Session", "Disconnect requested")
@@ -114,7 +116,7 @@ class GrokVoiceSession(
         cleanupConnection(notifyListener = true)
     }
 
-    private fun cleanupConnection(notifyListener: Boolean) {
+    private fun cleanupConnection(notifyListener: Boolean, disconnectReason: String? = null) {
         responseWatchdogJob?.cancel()
         responseWatchdogJob = null
         audioCapture.stop()
@@ -125,11 +127,37 @@ class GrokVoiceSession(
         activeResponseId = null
         pendingDebugText = null
         awaitingToolsRestore = false
-        speakActive = false
+        awaitingGreetingCompletion = false
+        deferMicResumeForClientTool = false
+        toolFollowupResponsePending = false
+        suppressUserTranscripts = false
+        audioRoute.exitVoiceChat()
         VoiceLog.d("Session", "Connection cleaned up (audio_chunks_sent=$audioChunksSent)")
         if (notifyListener) {
-            listener.onDisconnected()
+            listener.onDisconnected(disconnectReason)
         }
+    }
+
+    fun sendSpokenUserMessage(text: String) {
+        val socket = webSocket ?: run {
+            VoiceLog.w("Session", "sendSpokenUserMessage dropped — socket null")
+            return
+        }
+        if (!sessionConfigured) {
+            VoiceLog.w("Session", "sendSpokenUserMessage dropped — session not configured")
+            return
+        }
+        clearResponseWatchdog()
+        if (audioCapture.isCapturing()) {
+            audioCapture.stop()
+            micGate.pauseForTextInject()
+            VoiceLog.clientEvent("input_audio_buffer.clear (before spoken user inject)")
+            socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
+        } else {
+            micGate.pauseForTextInject()
+        }
+        listener.onUserTranscriptCompleted(text)
+        sendUserTextTurn(socket, text, logLabel = "spoken user")
     }
 
     fun sendTextMessage(text: String) {
@@ -155,6 +183,29 @@ class GrokVoiceSession(
         socket.send(VoiceSessionUpdateBuilder.directSpeechForDebugInject().toString())
     }
 
+    /**
+     * Server-side session tools (e.g. web_search) can still emit function_call_arguments.done.
+     * Acknowledge without response.create — xAI already ran the tool and speech is in the same turn.
+     */
+    private fun acknowledgeServerExecutedTool(socket: WebSocket, name: String, callId: String) {
+        listener.onServerToolExecuted(name)
+        VoiceLog.i("Session", "Acknowledging server-executed tool $name (call_id=$callId, no follow-up)")
+        VoiceLog.clientEvent("conversation.item.create (server_tool_ack, call_id=$callId)")
+        socket.send(
+            JSONObject().apply {
+                put("type", "conversation.item.create")
+                put(
+                    "item",
+                    JSONObject().apply {
+                        put("type", "function_call_output")
+                        put("call_id", callId)
+                        put("output", """{"status":"completed"}""")
+                    },
+                )
+            }.toString(),
+        )
+    }
+
     fun sendToolResult(output: String, callId: String) {
         val socket = webSocket ?: run {
             VoiceLog.w("Session", "sendToolResult dropped — socket null (call_id=$callId)")
@@ -175,9 +226,10 @@ class GrokVoiceSession(
                 )
             }.toString(),
         )
+        toolFollowupResponsePending = true
         VoiceLog.clientEvent("response.create (after tool result)")
         socket.send(JSONObject().put("type", "response.create").toString())
-        scheduleResponseWatchdog(socket)
+        scheduleResponseWatchdog(socket, WatchdogKind.TOOL_FOLLOWUP)
     }
 
     private fun sendSessionUpdate(socket: WebSocket) {
@@ -192,9 +244,30 @@ class GrokVoiceSession(
         socket.send(VoiceSessionUpdateBuilder.withTools().toString())
     }
 
+    private fun sendInitialGreeting(socket: WebSocket) {
+        awaitingGreetingCompletion = true
+        VoiceLog.clientEvent("response.create (initial greeting)")
+        socket.send(
+            JSONObject().apply {
+                put("type", "response.create")
+                put(
+                    "response",
+                    JSONObject().apply {
+                        put("instructions", VoiceSessionUpdateBuilder.initialGreetingInstructions)
+                    },
+                )
+            }.toString(),
+        )
+        scheduleResponseWatchdog(socket, WatchdogKind.RESPONSE_CREATE)
+    }
+
     private fun sendPendingDebugText(socket: WebSocket, text: String) {
         micGate.holdUntilSpokenDone()
-        VoiceLog.clientEvent("conversation.item.create (text: $text)")
+        sendUserTextTurn(socket, text, logLabel = "text")
+    }
+
+    private fun sendUserTextTurn(socket: WebSocket, text: String, logLabel: String) {
+        VoiceLog.clientEvent("conversation.item.create ($logLabel: $text)")
         socket.send(
             JSONObject().apply {
                 put("type", "conversation.item.create")
@@ -218,9 +291,9 @@ class GrokVoiceSession(
                 )
             }.toString(),
         )
-        VoiceLog.clientEvent("response.create (after text message)")
+        VoiceLog.clientEvent("response.create (after $logLabel message)")
         socket.send(JSONObject().put("type", "response.create").toString())
-        scheduleResponseWatchdog(socket)
+        scheduleResponseWatchdog(socket, WatchdogKind.RESPONSE_CREATE)
     }
 
     private fun handleServerEvent(socket: WebSocket, raw: String) {
@@ -257,9 +330,10 @@ class GrokVoiceSession(
                 when {
                     !sessionConfigured -> {
                         sessionConfigured = true
-                        VoiceLog.i("Session", "Session configured — tap Speak to use microphone")
+                        VoiceLog.i("Session", "Session configured — sending initial greeting")
                         listener.onSessionReady()
-                        listener.onStatusChanged("Connected — tap Speak")
+                        listener.onStatusChanged("Grok is greeting you…")
+                        sendInitialGreeting(socket)
                     }
                     pendingText != null -> {
                         pendingDebugText = null
@@ -267,13 +341,15 @@ class GrokVoiceSession(
                     }
                     awaitingToolsRestore -> {
                         awaitingToolsRestore = false
-                        if (speakActive) {
-                            startAudioCapture()
-                        }
+                        startAudioCapture()
                     }
                 }
             }
             "input_audio_buffer.speech_started" -> {
+                if (suppressUserTranscripts) {
+                    VoiceLog.d("Session", "Ignoring speech_started during assistant turn")
+                    return
+                }
                 clearResponseWatchdog()
                 listener.onUserSpeechStarted()
                 listener.onStatusChanged("You are speaking")
@@ -283,21 +359,17 @@ class GrokVoiceSession(
                 listener.onStatusChanged("Processing…")
             }
             "input_audio_buffer.committed" -> {
-                VoiceLog.i("Session", "Audio committed — waiting for response")
-                if (speakActive) {
-                    speakActive = false
-                    stopListening(notifyStatus = false)
-                    listener.onSpeakTurnEnded()
-                }
-                scheduleResponseWatchdog(socket)
+                VoiceLog.i("Session", "Audio committed — server VAD will create response")
             }
             "conversation.item.input_audio_transcription.updated" -> {
+                if (suppressUserTranscripts) return
                 val transcript = json.optString("transcript", "")
                 if (transcript.isNotBlank()) {
                     listener.onUserTranscriptUpdated(transcript)
                 }
             }
             "conversation.item.input_audio_transcription.completed" -> {
+                if (suppressUserTranscripts) return
                 val transcript = json.optString("transcript", "")
                 if (transcript.isNotBlank()) {
                     listener.onUserTranscriptCompleted(transcript)
@@ -307,6 +379,8 @@ class GrokVoiceSession(
                 clearResponseWatchdog()
                 activeResponseId = json.optJSONObject("response")?.optString("id")
                 activeResponseHadAudio = false
+                suppressUserTranscripts = true
+                pauseMicForAssistantTurn(socket)
                 VoiceLog.i("Session", "Response started (id=$activeResponseId)")
                 listener.onStatusChanged("Grok is responding…")
             }
@@ -333,8 +407,13 @@ class GrokVoiceSession(
             "response.function_call_arguments.done" -> {
                 clearResponseWatchdog()
                 val name = json.getString("name")
-                val arguments = JSONObject(json.getString("arguments"))
                 val callId = json.getString("call_id")
+                if (name in SERVER_EXECUTED_TOOLS) {
+                    acknowledgeServerExecutedTool(socket, name, callId)
+                    return
+                }
+                deferMicResumeForClientTool = true
+                val arguments = JSONObject(json.getString("arguments"))
                 listener.onFunctionCall(name, arguments, callId)
             }
             "response.done" -> {
@@ -342,13 +421,35 @@ class GrokVoiceSession(
                 val hadAudio = activeResponseHadAudio
                 activeResponseId = null
                 activeResponseHadAudio = false
-                VoiceLog.i("Session", "Response complete (had_audio=$hadAudio)")
+                VoiceLog.i(
+                    "Session",
+                    "Response complete (had_audio=$hadAudio, defer_tool=$deferMicResumeForClientTool, " +
+                        "tool_followup_pending=$toolFollowupResponsePending)",
+                )
                 if (sessionConfigured) {
-                    listener.onStatusChanged("Listening")
-                    if (micGate.shouldResumeCaptureAfterResponse(hadAudio)) {
-                        micGate.onCaptureResumed()
-                        awaitingToolsRestore = true
-                        sendToolsSessionRestore(socket)
+                    if (awaitingGreetingCompletion) {
+                        awaitingGreetingCompletion = false
+                        listener.onStatusChanged("Preparing microphone…")
+                        startAudioCaptureAfterPlaybackIdle()
+                    } else if (deferMicResumeForClientTool && !toolFollowupResponsePending) {
+                        listener.onStatusChanged("Running tool…")
+                    } else {
+                        if (toolFollowupResponsePending) {
+                            deferMicResumeForClientTool = false
+                            toolFollowupResponsePending = false
+                        }
+                        val finalizeResponse = {
+                            suppressUserTranscripts = false
+                            listener.onStatusChanged(
+                                if (hadAudio) "Listening — ask a question" else "Listening",
+                            )
+                            resumeMicAfterInject(socket, hadAudio)
+                        }
+                        if (hadAudio || !audioPlayback.isIdle()) {
+                            audioPlayback.whenIdle(finalizeResponse)
+                        } else {
+                            finalizeResponse()
+                        }
                     }
                 }
             }
@@ -358,53 +459,88 @@ class GrokVoiceSession(
                     ?: json.optString("error")
                     ?: json.optString("message", "Unknown voice API error")
                 VoiceLog.e("Session", "API error: $message")
-                listener.onError(message)
+                listener.onError(message, recoverable = true)
             }
             else -> VoiceLog.d("Session", "Unhandled event type: $type")
         }
     }
 
-    private fun stopListening(notifyStatus: Boolean) {
-        if (!audioCapture.isCapturing()) return
-        audioCapture.stop()
-        micGate.onCaptureStopped()
-        VoiceLog.i("Session", "Mic streaming stopped")
-        if (notifyStatus) {
-            listener.onStatusChanged("Connected — tap Speak")
+    private fun pauseMicForAssistantTurn(socket: WebSocket) {
+        if (audioCapture.isCapturing()) {
+            audioCapture.stop()
+            VoiceLog.clientEvent("input_audio_buffer.clear (assistant turn)")
+            socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
+        }
+    }
+
+    private fun resumeMicAfterInject(socket: WebSocket, hadAudio: Boolean) {
+        when {
+            micGate.shouldRestoreToolsAfterDirectSpeech(hadAudio) -> {
+                micGate.onCaptureResumed()
+                awaitingToolsRestore = true
+                sendToolsSessionRestore(socket)
+            }
+            micGate.shouldResumeMicAfterSpokenInject() || !audioCapture.isCapturing() -> {
+                micGate.onCaptureResumed()
+                startAudioCapture()
+            }
+        }
+    }
+
+    private fun startAudioCaptureAfterPlaybackIdle() {
+        audioPlayback.whenIdle {
+            startAudioCapture()
         }
     }
 
     private fun startAudioCapture() {
-        try {
-            audioCapture.start(scope) { base64Chunk ->
-                audioChunksSent++
-                if (audioChunksSent == 1 || audioChunksSent % AUDIO_CHUNK_LOG_INTERVAL == 0) {
-                    VoiceLog.d("Session", "Streaming mic audio (chunks_sent=$audioChunksSent)")
-                }
-                webSocket?.send(
-                    JSONObject().apply {
-                        put("type", "input_audio_buffer.append")
-                        put("audio", base64Chunk)
-                    }.toString(),
+        scope.launch(Dispatchers.IO) {
+            try {
+                audioCapture.start(
+                    onChunk = { base64Chunk ->
+                        audioChunksSent++
+                        if (audioChunksSent == 1 || audioChunksSent % AUDIO_CHUNK_LOG_INTERVAL == 0) {
+                            VoiceLog.d("Session", "Streaming mic audio (chunks_sent=$audioChunksSent)")
+                        }
+                        webSocket?.send(
+                            JSONObject().apply {
+                                put("type", "input_audio_buffer.append")
+                                put("audio", base64Chunk)
+                            }.toString(),
+                        )
+                    },
+                    onFailure = { message ->
+                        listener.onError(message, recoverable = true)
+                    },
                 )
+                micGate.onCaptureStarted()
+                suppressUserTranscripts = false
+                listener.onStatusChanged("Listening — ask a question")
+                VoiceLog.i("Session", "Mic streaming active (100ms PCM16 chunks)")
+            } catch (e: Exception) {
+                VoiceLog.e("Session", "Audio capture failed", e)
+                listener.onError(e.message ?: "Microphone capture failed", recoverable = true)
             }
-            micGate.onCaptureStarted()
-            listener.onStatusChanged("Listening")
-            VoiceLog.i("Session", "Mic streaming active (100ms PCM16 chunks)")
-        } catch (e: Exception) {
-            VoiceLog.e("Session", "Audio capture failed", e)
-            listener.onError(e.message ?: "Microphone capture failed")
         }
     }
 
-    private fun scheduleResponseWatchdog(socket: WebSocket) {
+    /**
+     * Guards only client-initiated [response.create] turns until [response.created] arrives.
+     * Not used for server-VAD commits — the server owns that lifecycle.
+     */
+    private fun scheduleResponseWatchdog(socket: WebSocket, kind: WatchdogKind) {
         responseWatchdogJob?.cancel()
-        VoiceLog.d("Session", "Response watchdog started (${RESPONSE_TIMEOUT_MS}ms)")
+        val timeoutMs = when (kind) {
+            WatchdogKind.RESPONSE_CREATE -> RESPONSE_CREATE_TIMEOUT_MS
+            WatchdogKind.TOOL_FOLLOWUP -> TOOL_FOLLOWUP_TIMEOUT_MS
+        }
+        VoiceLog.d("Session", "Response watchdog started (${timeoutMs}ms, kind=$kind)")
         responseWatchdogJob = scope.launch {
-            delay(RESPONSE_TIMEOUT_MS)
+            delay(timeoutMs)
             VoiceLog.w(
                 "Session",
-                "Response timeout — cancelling (response_id=$activeResponseId, chunks_sent=$audioChunksSent)",
+                "Response watchdog fired (kind=$kind, response_id=$activeResponseId, " +
+                    "chunks_sent=$audioChunksSent)",
             )
             activeResponseId?.let { responseId ->
                 VoiceLog.clientEvent("response.cancel (response_id=$responseId)")
@@ -415,8 +551,10 @@ class GrokVoiceSession(
                     }.toString(),
                 )
             }
-            VoiceLog.clientEvent("input_audio_buffer.clear")
-            socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
+            if (kind == WatchdogKind.RESPONSE_CREATE) {
+                VoiceLog.clientEvent("input_audio_buffer.clear (watchdog)")
+                socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
+            }
             activeResponseId = null
             listener.onStatusChanged("Listening")
         }
@@ -430,8 +568,19 @@ class GrokVoiceSession(
         responseWatchdogJob = null
     }
 
+    private enum class WatchdogKind {
+        /** After client sends response.create (greeting, text/spoken inject). */
+        RESPONSE_CREATE,
+        /** After client sends response.create following a function_call_output. */
+        TOOL_FOLLOWUP,
+    }
+
     companion object {
-        private const val RESPONSE_TIMEOUT_MS = 20_000L
+        private const val RESPONSE_CREATE_TIMEOUT_MS = 20_000L
+        private const val TOOL_FOLLOWUP_TIMEOUT_MS = 60_000L
         private const val AUDIO_CHUNK_LOG_INTERVAL = 50
+
+        /** Tools configured with type-only entries in session.update; executed by xAI, not the client. */
+        private val SERVER_EXECUTED_TOOLS = setOf("web_search", "x_search", "file_search")
     }
 }

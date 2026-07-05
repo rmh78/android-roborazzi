@@ -6,7 +6,10 @@
             android:name=".voice.VoiceDebugReceiver"
             android:exported="true">
             <intent-filter>
+                <action android:name="com.example.roborazzidemo.VOICE_TEST_WARMUP" />
+                <action android:name="com.example.roborazzidemo.VOICE_TEST_ANNOUNCE" />
                 <action android:name="com.example.roborazzidemo.VOICE_TEXT" />
+                <action android:name="com.example.roborazzidemo.VOICE_SPOKEN" />
                 <action android:name="com.example.roborazzidemo.VOICE_DISCONNECT" />
             </intent-filter>
         </receiver>

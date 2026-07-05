@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,6 +23,10 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.roborazzidemo.viewmodel.TranscriptLine
@@ -32,7 +37,6 @@ import com.example.roborazzidemo.viewmodel.VoiceUiState
 fun VoiceTranscriptOverlay(
     state: VoiceUiState,
     onConnectChange: (Boolean) -> Unit,
-    onSpeakChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -66,7 +70,9 @@ fun VoiceTranscriptOverlay(
                         checked = state.isConnected,
                         onCheckedChange = onConnectChange,
                         enabled = state.hasApiKey,
-                        modifier = Modifier.testTag("voice_connect_switch"),
+                        modifier = Modifier
+                            .testTag("voice_connect_switch")
+                            .semantics { contentDescription = "voice-connect-switch" },
                     )
                 }
             }
@@ -75,6 +81,11 @@ fun VoiceTranscriptOverlay(
                 text = disconnectedStatus(state),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .testTag("voice_status_text")
+                    .semantics {
+                        contentDescription = "voice-status-${disconnectedStatus(state)}"
+                    },
             )
 
             state.errorMessage?.let { error ->
@@ -86,30 +97,21 @@ fun VoiceTranscriptOverlay(
             }
 
             if (state.isConnected) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Speak", style = MaterialTheme.typography.labelMedium)
-                    Switch(
-                        checked = state.isSpeakActive,
-                        onCheckedChange = onSpeakChange,
-                        modifier = Modifier.testTag("voice_speak_switch"),
-                    )
-                }
-
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Mic level", style = MaterialTheme.typography.labelSmall)
                     Box(
                         modifier = Modifier
                             .padding(start = 8.dp)
                             .height(8.dp)
-                            .width((120 * state.audioLevel).dp.coerceAtLeast(4.dp))
+                            .width((8 + 112 * state.audioLevel).dp)
                             .background(
                                 MaterialTheme.colorScheme.primary,
                                 RoundedCornerShape(4.dp),
-                            ),
+                            )
+                            .semantics {
+                                stateDescription = "audio-level-${"%.4f".format(state.audioLevel)}"
+                            }
+                            .testTag("voice_mic_level_bar"),
                     )
                 }
 
@@ -118,6 +120,9 @@ fun VoiceTranscriptOverlay(
                         text = "Tool: ${state.lastToolName}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.semantics {
+                            contentDescription = "voice-last-tool-${state.lastToolName}"
+                        },
                     )
                 }
 
@@ -132,6 +137,14 @@ fun VoiceTranscriptOverlay(
                     scrollState.animateScrollTo(scrollState.maxValue)
                 }
 
+                Box(
+                    modifier = Modifier
+                        .size(1.dp)
+                        .semantics(mergeDescendants = false) {
+                            contentDescription = "voice-transcript-summary-${turnSummary(state)}"
+                        },
+                )
+
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -139,14 +152,25 @@ fun VoiceTranscriptOverlay(
                         .verticalScroll(scrollState),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    state.transcriptLines.forEach { line ->
-                        TranscriptBubble(line)
+                    state.transcriptLines.forEachIndexed { index, line ->
+                        TranscriptBubble(line = line, turnIndex = index)
                     }
+                    val liveTurnBase = state.transcriptLines.size
                     if (state.liveUserText.isNotBlank()) {
-                        LiveTranscriptLine(prefix = "You", text = state.liveUserText)
+                        LiveTranscriptLine(
+                            prefix = "You",
+                            text = state.liveUserText,
+                            turnIndex = liveTurnBase,
+                            isLive = true,
+                        )
                     }
                     if (state.liveAssistantText.isNotBlank()) {
-                        LiveTranscriptLine(prefix = "Grok", text = state.liveAssistantText)
+                        LiveTranscriptLine(
+                            prefix = "Grok",
+                            text = state.liveAssistantText,
+                            turnIndex = liveTurnBase + if (state.liveUserText.isNotBlank()) 1 else 0,
+                            isLive = true,
+                        )
                     }
                 }
             }
@@ -155,21 +179,35 @@ fun VoiceTranscriptOverlay(
 }
 
 @Composable
-private fun TranscriptBubble(line: TranscriptLine) {
+private fun TranscriptBubble(line: TranscriptLine, turnIndex: Int) {
     val prefix = when (line.role) {
         TranscriptRole.User -> "You"
         TranscriptRole.Assistant -> "Grok"
     }
-    LiveTranscriptLine(prefix = prefix, text = line.text)
+    LiveTranscriptLine(prefix = prefix, text = line.text, turnIndex = turnIndex)
 }
 
 @Composable
-private fun LiveTranscriptLine(prefix: String, text: String) {
+private fun LiveTranscriptLine(
+    prefix: String,
+    text: String,
+    turnIndex: Int,
+    isLive: Boolean = false,
+) {
+    val role = prefix.lowercase()
     val prefixColor = when (prefix) {
         "You" -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.secondary
     }
-    Row {
+    Row(
+        modifier = Modifier.clearAndSetSemantics {
+            contentDescription = if (isLive) {
+                "voice-transcript-live-$role"
+            } else {
+                "voice-transcript-$turnIndex-$role"
+            }
+        },
+    ) {
         Text(
             text = "$prefix: ",
             style = MaterialTheme.typography.bodyMedium,
@@ -188,6 +226,26 @@ private fun disconnectedStatus(state: VoiceUiState): String {
     if (!state.hasApiKey) return "Set XAI_API_KEY before building the app."
     if (!state.hasMicrophonePermission) return "Tap Connect to grant microphone access."
     return state.status
+}
+
+private fun turnSummary(state: VoiceUiState): String = buildString {
+    state.transcriptLines.forEach { line ->
+        if (isNotEmpty()) append(',')
+        append(
+            when (line.role) {
+                TranscriptRole.User -> "you"
+                TranscriptRole.Assistant -> "grok"
+            },
+        )
+    }
+    if (state.liveUserText.isNotBlank()) {
+        if (isNotEmpty()) append(',')
+        append("you")
+    }
+    if (state.liveAssistantText.isNotBlank()) {
+        if (isNotEmpty()) append(',')
+        append("grok")
+    }
 }
 
 private fun buildTranscriptText(
