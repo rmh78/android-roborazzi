@@ -126,6 +126,57 @@ The overlay shows live **You** / **Grok** transcript turns, mic level, status, a
 
 Session config uses `grok-voice-latest`, voice `eve`, server VAD, and an **Answer brief.** instruction for short spoken replies.
 
+### Emulator vs physical device (echo and duplex)
+
+Voice behaves very differently on an AVD than on a real phone. The app detects emulators via [`VoiceDeviceHints`](app/src/main/java/com/example/roborazzidemo/voice/VoiceDeviceHints.kt) and picks an audio strategy per platform.
+
+#### The emulator echo problem
+
+Android emulators do not provide working acoustic echo cancellation. On a typical Mac setup the loop looks like this:
+
+```
+Grok speaks (emulator speaker)
+  → host speakers play audio
+    → Mac microphone picks it up
+      → AVD virtual mic forwards it back
+        → Grok hears its own reply and responds again
+```
+
+You get an echo loop, phantom user turns, or Grok answering itself. Mitigations like VAD tuning, stream attenuation, or keeping the mic hot for barge-in are not enough on their own.
+
+Emulators also have fragile capture:
+
+- `VOICE_COMMUNICATION` (the xAI demo default on hardware) is often **silent** on AVDs, so capture falls back to `MIC`.
+- `MODE_IN_COMMUNICATION` routing can silence the virtual microphone, so the app keeps the default route on emulators.
+
+**What this app does on emulators:** **half-duplex** mode in [`GrokVoiceSession`](app/src/main/java/com/example/roborazzidemo/voice/GrokVoiceSession.kt):
+
+- Mute the mic while Grok is speaking (`response.created` / audio deltas).
+- Resume after playback drains plus a short tail delay (~450 ms).
+- Do **not** send `input_audio_buffer.clear` — server VAD still owns committed audio.
+- No barge-in — you cannot talk over Grok on an emulator.
+
+That trades natural conversation for stability. Expect turn-taking: wait for **Listening — ask a question** before you speak.
+
+**Tips when testing on an AVD:**
+
+- Extended Controls → Microphone → enable *Virtual microphone uses host audio input* if you need host mic passthrough.
+- Use headphones so emulator speech does not feed the host mic.
+- Lower host mic gain in macOS Sound settings.
+- For CI and scripted runs, prefer TTS + `VOICE_SPOKEN` injects (see below) over live host audio.
+
+#### The magic on a real device
+
+On a physical phone the same code path follows the [xAI Android Voice demo](https://github.com/xai-org/xai-cookbook/tree/main/Android/VoiceApiAndroidExample) closely:
+
+- **Audio route:** `MODE_IN_COMMUNICATION` with speakerphone on ([`VoiceAudioRoute`](app/src/main/java/com/example/roborazzidemo/voice/VoiceAudioRoute.kt)).
+- **Mic source:** `VOICE_COMMUNICATION` with platform **AEC**, noise suppression, and automatic gain control ([`PcmAudioCapture`](app/src/main/java/com/example/roborazzidemo/voice/PcmAudioCapture.kt)).
+- **Full duplex:** the mic streams continuously; nothing is muted client-side between turns.
+- **Barge-in:** if you start speaking while Grok is talking, playback is flushed and your speech takes over.
+- **Server VAD:** turn detection stays on the server; the client does not implement its own end-of-utterance logic.
+
+Hardware AEC plus the voice-communication audio path is what makes always-on, hands-free conversation work without echo loops. That is the “magic” you do not get on an emulator — use a real device when validating natural voice UX.
+
 ### Voice integration test (emulator)
 
 A single instrumented E2E test connects to the live API, exercises every nav screen and voice tool, validates conversation turn order (You → Grok), and disconnects. Requires `XAI_API_KEY`, a running emulator/device, and network.

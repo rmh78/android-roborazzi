@@ -41,7 +41,7 @@ object VoiceSessionUpdateBuilder {
                     put("voice", VoiceConstants.VOICE_ID)
                     put("instructions", instructions)
                     put("reasoning", JSONObject().put("effort", "none"))
-                    put("turn_detection", JSONObject().put("type", "server_vad"))
+                    put("turn_detection", VoiceDeviceHints.turnDetection())
                     put(
                         "audio",
                         JSONObject().apply {

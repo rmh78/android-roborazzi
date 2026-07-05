@@ -162,9 +162,11 @@ fun VoiceTranscriptOverlay(
                 }
 
                 val scrollState = rememberScrollState()
+                val showLiveUser = state.liveUserText.isNotBlank() &&
+                    !(state.isAssistantTurnActive && state.liveAssistantText.isNotBlank())
                 val transcriptText = buildTranscriptText(
                     lines = state.transcriptLines,
-                    liveUser = state.liveUserText,
+                    liveUser = if (showLiveUser) state.liveUserText else "",
                     liveAssistant = state.liveAssistantText,
                 )
 
@@ -193,8 +195,10 @@ fun VoiceTranscriptOverlay(
                     state.transcriptLines.forEachIndexed { index, line ->
                         TranscriptBubble(line = line, turnIndex = index)
                     }
+                    val showLiveUser = state.liveUserText.isNotBlank() &&
+                        !(state.isAssistantTurnActive && state.liveAssistantText.isNotBlank())
                     val liveTurnBase = state.transcriptLines.size
-                    if (state.liveUserText.isNotBlank()) {
+                    if (showLiveUser) {
                         LiveTranscriptLine(
                             prefix = "You",
                             text = state.liveUserText,
@@ -206,7 +210,7 @@ fun VoiceTranscriptOverlay(
                         LiveTranscriptLine(
                             prefix = "Grok",
                             text = state.liveAssistantText,
-                            turnIndex = liveTurnBase + if (state.liveUserText.isNotBlank()) 1 else 0,
+                            turnIndex = liveTurnBase + if (showLiveUser) 1 else 0,
                             isLive = true,
                         )
                     }
@@ -312,7 +316,9 @@ private fun turnSummary(state: VoiceUiState): String = buildString {
             },
         )
     }
-    if (state.liveUserText.isNotBlank()) {
+    val showLiveUser = state.liveUserText.isNotBlank() &&
+        !(state.isAssistantTurnActive && state.liveAssistantText.isNotBlank())
+    if (showLiveUser) {
         if (isNotEmpty()) append(',')
         append("you")
     }
