@@ -46,7 +46,7 @@ class VoiceAppTestRobot private constructor(
         VoiceE2ELog.detail("response complete: status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
     }
 
-    fun speakAndWaitForTool(text: String, toolName: String, timeoutMillis: Long = 180_000) {
+    fun speakAndWaitForTool(text: String, toolName: String, timeoutMillis: Long = 60_000) {
         waitForReadyToSpeak()
         VoiceE2ELog.step("speak (tool=$toolName): \"$text\"")
         val baseline = toolWaitBaseline()
