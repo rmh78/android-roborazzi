@@ -154,12 +154,9 @@ class VoiceAppTestRobot private constructor(
 
     private fun isReadyToAcceptSpeech(): Boolean {
         val current = status()
-        if (isAssistantTurnIdle() && isReadyToListen(current) && !isAssistantSpeaking(current)) {
-            return true
-        }
-        return !isAssistantTurnActive() &&
-            !isAssistantSpeaking(current) &&
-            isReadyToListen(current)
+        if (!isReadyToListen(current) || isAssistantSpeaking(current)) return false
+        if (isAssistantTurnActive()) return false
+        return true
     }
 
     private fun waitForUserTurnRegistered(
@@ -315,6 +312,7 @@ class VoiceAppTestRobot private constructor(
             VoiceE2ELog.detail(
                 "exchange turns recorded; proceeding without full session idle (${diagnostics()})",
             )
+            waitForListenStatus(60_000)
             return
         }
         error("Expected valid user exchange turn(s). ${diagnostics()}")
@@ -329,9 +327,14 @@ class VoiceAppTestRobot private constructor(
     }
 
     private fun exchangeTurnsReady(): Boolean =
-        exchangeTurnsRecorded() &&
-            isReadyToAcceptSpeech() &&
-            isAssistantTurnFinished(status())
+        exchangeTurnsRecorded() && isReadyToAcceptSpeech()
+
+    private fun waitForListenStatus(timeoutMillis: Long) {
+        waitUntil(timeoutMillis, "Timed out waiting for listen status. ${diagnostics()}") {
+            val current = status()
+            isReadyToListen(current) && !isAssistantSpeaking(current)
+        }
+    }
 
     fun assertConversationTurnCounts(
         minYou: Int,
