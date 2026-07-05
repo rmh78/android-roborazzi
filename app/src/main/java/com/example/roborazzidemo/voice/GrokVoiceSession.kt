@@ -5,6 +5,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -37,6 +41,7 @@ class GrokVoiceSession(
     applicationContext: Context,
 ) {
     private val audioCapture = PcmAudioCapture(applicationContext)
+    private val syntheticMicLevel = SyntheticMicLevelAnimator(scope)
     private val audioPlayback = PcmAudioPlayback()
     private val audioRoute = VoiceAudioRoute(applicationContext)
     private val micGate = MicCaptureGate()
@@ -52,9 +57,15 @@ class GrokVoiceSession(
     private var awaitingGreetingCompletion = false
     private var deferMicResumeForClientTool = false
     private var toolFollowupResponsePending = false
+    private var toolFollowupResponseId: String? = null
     private var suppressUserTranscripts = false
 
-    val audioLevel = audioCapture.audioLevel
+    val audioLevel: StateFlow<Float> = combine(
+        audioCapture.audioLevel,
+        syntheticMicLevel.level,
+    ) { capturedLevel, syntheticLevel ->
+        maxOf(capturedLevel, syntheticLevel)
+    }.stateIn(scope, SharingStarted.Eagerly, 0f)
 
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -74,6 +85,7 @@ class GrokVoiceSession(
         awaitingGreetingCompletion = false
         deferMicResumeForClientTool = false
         toolFollowupResponsePending = false
+        toolFollowupResponseId = null
         suppressUserTranscripts = false
         audioRoute.enterVoiceChat()
 
@@ -120,6 +132,7 @@ class GrokVoiceSession(
         responseWatchdogJob?.cancel()
         responseWatchdogJob = null
         audioCapture.stop()
+        syntheticMicLevel.cancel()
         audioPlayback.stop()
         webSocket = null
         sessionConfigured = false
@@ -130,12 +143,17 @@ class GrokVoiceSession(
         awaitingGreetingCompletion = false
         deferMicResumeForClientTool = false
         toolFollowupResponsePending = false
+        toolFollowupResponseId = null
         suppressUserTranscripts = false
         audioRoute.exitVoiceChat()
         VoiceLog.d("Session", "Connection cleaned up (audio_chunks_sent=$audioChunksSent)")
         if (notifyListener) {
             listener.onDisconnected(disconnectReason)
         }
+    }
+
+    fun pulseMicLevelForSpeech(text: String) {
+        syntheticMicLevel.pulseForSpeech(text)
     }
 
     fun sendSpokenUserMessage(text: String) {
@@ -147,6 +165,7 @@ class GrokVoiceSession(
             VoiceLog.w("Session", "sendSpokenUserMessage dropped — session not configured")
             return
         }
+        syntheticMicLevel.pulseForDuration(PROCESSING_MIC_PULSE_MS)
         clearResponseWatchdog()
         if (audioCapture.isCapturing()) {
             audioCapture.stop()
@@ -381,6 +400,13 @@ class GrokVoiceSession(
                 activeResponseHadAudio = false
                 suppressUserTranscripts = true
                 pauseMicForAssistantTurn(socket)
+                if (toolFollowupResponsePending) {
+                    toolFollowupResponseId = activeResponseId
+                    VoiceLog.i(
+                        "Session",
+                        "Tool follow-up response started (id=$toolFollowupResponseId)",
+                    )
+                }
                 VoiceLog.i("Session", "Response started (id=$activeResponseId)")
                 listener.onStatusChanged("Grok is responding…")
             }
@@ -418,25 +444,43 @@ class GrokVoiceSession(
             }
             "response.done" -> {
                 clearResponseWatchdog()
+                val responseId = activeResponseId
                 val hadAudio = activeResponseHadAudio
                 activeResponseId = null
                 activeResponseHadAudio = false
+                val isToolFollowupCompletion =
+                    toolFollowupResponsePending && responseId == toolFollowupResponseId
                 VoiceLog.i(
                     "Session",
-                    "Response complete (had_audio=$hadAudio, defer_tool=$deferMicResumeForClientTool, " +
-                        "tool_followup_pending=$toolFollowupResponsePending)",
+                    "Response complete (id=$responseId, had_audio=$hadAudio, " +
+                        "defer_tool=$deferMicResumeForClientTool, " +
+                        "tool_followup_pending=$toolFollowupResponsePending, " +
+                        "tool_followup_id=$toolFollowupResponseId, " +
+                        "is_tool_followup_done=$isToolFollowupCompletion)",
                 )
                 if (sessionConfigured) {
                     if (awaitingGreetingCompletion) {
                         awaitingGreetingCompletion = false
                         listener.onStatusChanged("Preparing microphone…")
                         startAudioCaptureAfterPlaybackIdle()
+                    } else if (
+                        deferMicResumeForClientTool &&
+                        toolFollowupResponsePending &&
+                        !isToolFollowupCompletion
+                    ) {
+                        // Tool-call response finished before the follow-up response completes.
+                        deferMicResumeForClientTool = false
+                        VoiceLog.d(
+                            "Session",
+                            "Tool-call response done — waiting for follow-up speech",
+                        )
                     } else if (deferMicResumeForClientTool && !toolFollowupResponsePending) {
                         listener.onStatusChanged("Running tool…")
                     } else {
-                        if (toolFollowupResponsePending) {
+                        if (isToolFollowupCompletion) {
                             deferMicResumeForClientTool = false
                             toolFollowupResponsePending = false
+                            toolFollowupResponseId = null
                         }
                         val finalizeResponse = {
                             suppressUserTranscripts = false
@@ -579,6 +623,7 @@ class GrokVoiceSession(
         private const val RESPONSE_CREATE_TIMEOUT_MS = 20_000L
         private const val TOOL_FOLLOWUP_TIMEOUT_MS = 60_000L
         private const val AUDIO_CHUNK_LOG_INTERVAL = 50
+        private const val PROCESSING_MIC_PULSE_MS = 1_500L
 
         /** Tools configured with type-only entries in session.update; executed by xAI, not the client. */
         private val SERVER_EXECUTED_TOOLS = setOf("web_search", "x_search", "file_search")

@@ -40,6 +40,7 @@ import com.example.roborazzidemo.theme.NexusOverlayText
 import com.example.roborazzidemo.theme.NexusOverlayTextDim
 import com.example.roborazzidemo.ui.futuristic.LcarsBarShape
 import com.example.roborazzidemo.ui.futuristic.LcarsPanelShape
+import com.example.roborazzidemo.ui.futuristic.SigLevelMeter
 import com.example.roborazzidemo.viewmodel.TranscriptLine
 import com.example.roborazzidemo.viewmodel.TranscriptRole
 import com.example.roborazzidemo.viewmodel.VoiceUiState
@@ -128,6 +129,10 @@ fun VoiceTranscriptOverlay(
                     },
             )
 
+            if (state.isConnected) {
+                AssistantTurnIndicator(isActive = state.isAssistantTurnActive)
+            }
+
             state.errorMessage?.let { error ->
                 Text(
                     text = error,
@@ -137,30 +142,12 @@ fun VoiceTranscriptOverlay(
             }
 
             if (state.isConnected) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                SigLevelMeter(
+                    level = state.audioLevel,
                     modifier = Modifier.semantics {
                         contentDescription = "voice-mic-level"
                     },
-                ) {
-                    Text(
-                        "SIG",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = LcarsBlue,
-                    )
-                    Box(
-                        modifier = Modifier
-                            .padding(start = 8.dp)
-                            .height(8.dp)
-                            .width((8 + 112 * state.audioLevel).dp)
-                            .clip(LcarsBarShape())
-                            .background(LcarsOrange)
-                            .semantics {
-                                stateDescription = "audio-level-${"%.4f".format(state.audioLevel)}"
-                            }
-                            .testTag("voice_mic_level_bar"),
-                    )
-                }
+                )
 
                 if (state.lastToolName.isNotBlank()) {
                     Text(
@@ -272,6 +259,37 @@ private fun LiveTranscriptLine(
             text = text,
             style = MaterialTheme.typography.bodyMedium,
             color = NexusOverlayText,
+        )
+    }
+}
+
+@Composable
+private fun AssistantTurnIndicator(isActive: Boolean) {
+    val label = if (isActive) "AI TX" else "AI RDY"
+    val markerColor = if (isActive) LcarsOrange else LcarsBlue
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.semantics(mergeDescendants = false) {
+            contentDescription = if (isActive) {
+                "voice-assistant-turn-active"
+            } else {
+                "voice-assistant-turn-idle"
+            }
+        },
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(RoundedCornerShape(50))
+                .background(markerColor),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = markerColor,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.testTag("voice_assistant_turn_indicator"),
         )
     }
 }

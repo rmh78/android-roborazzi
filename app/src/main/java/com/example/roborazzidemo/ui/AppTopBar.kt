@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -85,7 +86,7 @@ private fun ColumnTopBarLayout(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    Box(modifier = modifier.fillMaxWidth()) {
+    Box(modifier = modifier.fillMaxWidth().statusBarsPadding()) {
         content()
         Box(
             modifier = Modifier

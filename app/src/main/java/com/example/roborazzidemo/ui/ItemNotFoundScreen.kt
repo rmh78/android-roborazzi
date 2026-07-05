@@ -24,6 +24,7 @@ fun ItemNotFoundScreen(
 ) {
     Scaffold(
         containerColor = Color.Transparent,
+        contentWindowInsets = AppScaffoldInsets,
         topBar = {
             AppTopBar(
                 title = stringResource(R.string.item_not_found_title),

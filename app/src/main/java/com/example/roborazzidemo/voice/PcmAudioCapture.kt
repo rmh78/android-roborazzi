@@ -38,6 +38,7 @@ class PcmAudioCapture(
                 val sources = VoiceDeviceHints.preferredCaptureSources()
                 var lastError: String? = null
 
+                val emulator = VoiceDeviceHints.isLikelyEmulator()
                 for (source in sources) {
                     if (!isCapturing) return@Thread
                     releaseRecord()
@@ -49,7 +50,17 @@ class PcmAudioCapture(
                         continue
                     }
 
-                    val peakLevel = captureLoop(source, onChunk)
+                    if (emulator) {
+                        VoiceLog.i(
+                            "Mic",
+                            "Emulator capture active on ${sourceName(source)} — " +
+                                "streaming without silence probe (host mic may be quiet until you speak)",
+                        )
+                        captureLoop(source, onChunk, failOnSilence = false)
+                        return@Thread
+                    }
+
+                    val peakLevel = captureLoop(source, onChunk, failOnSilence = true)
                     if (peakLevel > SILENCE_LEVEL_THRESHOLD) {
                         return@Thread
                     }
@@ -66,9 +77,12 @@ class PcmAudioCapture(
                 val message = lastError ?: "No microphone capture source available"
                 VoiceLog.e("Mic", message)
                 onFailure(
-                    if (VoiceDeviceHints.isLikelyEmulator()) {
-                        "$message. On the emulator, enable host mic: Emulator menu → Microphone → " +
-                            "\"Virtual microphone uses host audio input\"."
+                    if (emulator) {
+                        "$message. Emulator mic could not be opened. Try Extended Controls → " +
+                            "Microphone → \"Virtual microphone uses host audio input\", or on debug builds " +
+                            "inject speech with adb: adb shell am broadcast -a " +
+                            "com.example.roborazzidemo.VOICE_SPOKEN --es text \"your question\" " +
+                            "com.example.roborazzidemo"
                     } else {
                         message
                     },
@@ -127,7 +141,11 @@ class PcmAudioCapture(
         return null
     }
 
-    private fun captureLoop(source: Int, onChunk: (String) -> Unit): Float {
+    private fun captureLoop(
+        source: Int,
+        onChunk: (String) -> Unit,
+        failOnSilence: Boolean,
+    ): Float {
         val record = audioRecord ?: return 0f
         val readBuffer = FloatArray(READ_BUFFER_SAMPLES)
         val pendingChunks = mutableListOf<FloatArray>()
@@ -173,7 +191,11 @@ class PcmAudioCapture(
                                     "chunks_sent=$chunksSent source=${sourceName(source)}",
                             )
                         }
-                        if (chunksSent >= SILENCE_RETRY_CHUNK_COUNT && peakLevel <= SILENCE_LEVEL_THRESHOLD) {
+                        if (
+                            failOnSilence &&
+                            chunksSent >= SILENCE_RETRY_CHUNK_COUNT &&
+                            peakLevel <= SILENCE_LEVEL_THRESHOLD
+                        ) {
                             return peakLevel
                         }
                     }
@@ -241,6 +263,7 @@ class PcmAudioCapture(
     private fun sourceName(source: Int): String = when (source) {
         MediaRecorder.AudioSource.MIC -> "MIC"
         MediaRecorder.AudioSource.VOICE_COMMUNICATION -> "VOICE_COMMUNICATION"
+        MediaRecorder.AudioSource.VOICE_RECOGNITION -> "VOICE_RECOGNITION"
         MediaRecorder.AudioSource.DEFAULT -> "DEFAULT"
         else -> source.toString()
     }

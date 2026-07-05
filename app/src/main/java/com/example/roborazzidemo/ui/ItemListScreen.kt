@@ -1,6 +1,7 @@
 package com.example.roborazzidemo.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,7 +22,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,6 +59,7 @@ fun ItemListScreen(
 ) {
     Scaffold(
         containerColor = Color.Transparent,
+        contentWindowInsets = AppScaffoldInsets,
         topBar = {
             AppTopBar(
                 title = stringResource(R.string.items_title),
@@ -61,10 +68,16 @@ fun ItemListScreen(
         },
     ) { innerPadding ->
         val listState = rememberLazyListState()
+        val highlightedIndex by scrollController?.highlightedIndex?.collectAsState()
+            ?: remember { mutableStateOf<Int?>(null) }
         val bottomInset = if (reserveVoiceOverlayInset) {
             VoiceOverlayMetrics.DisconnectedListBottomInset
         } else {
             0.dp
+        }
+
+        DisposableEffect(scrollController) {
+            onDispose { scrollController?.clearHighlight() }
         }
 
         LaunchedEffect(scrollController) {
@@ -96,6 +109,7 @@ fun ItemListScreen(
                     ItemRow(
                         item = item,
                         nodeIndex = index + 1,
+                        isHighlighted = highlightedIndex == index,
                         onClick = { onItemClick(item) },
                     )
                 }
@@ -115,6 +129,7 @@ fun ItemListScreen(
 private fun ItemRow(
     item: Item,
     nodeIndex: Int,
+    isHighlighted: Boolean = false,
     onClick: () -> Unit,
 ) {
     val indexAccent = when (nodeIndex % 4) {
@@ -123,16 +138,40 @@ private fun ItemRow(
         3 -> LcarsBlueDeep
         else -> Color(0xFF77BBFF)
     }
-    val indexBackground = indexAccent.copy(alpha = 0.28f)
+    val indexBackground = if (isHighlighted) {
+        LcarsOrange.copy(alpha = 0.42f)
+    } else {
+        indexAccent.copy(alpha = 0.28f)
+    }
     val shape = LcarsBarShape()
+    val rowBackground = if (isHighlighted) {
+        LcarsOrange.copy(alpha = 0.14f)
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(rowBackground)
+            .then(
+                if (isHighlighted) {
+                    Modifier.border(width = 2.dp, color = LcarsOrange, shape = shape)
+                } else {
+                    Modifier
+                },
+            )
             .clickable(onClick = onClick)
+            .semantics {
+                contentDescription = if (isHighlighted) {
+                    "item-row-selected-$nodeIndex"
+                } else {
+                    "item-row-$nodeIndex"
+                }
+            }
+            .testTag(if (isHighlighted) "item_row_selected_$nodeIndex" else "item_row_$nodeIndex")
             .padding(end = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -145,9 +184,9 @@ private fun ItemRow(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "%02d".format(nodeIndex),
+                text = if (isHighlighted) "SEL" else "%02d".format(nodeIndex),
                 style = MaterialTheme.typography.labelMedium,
-                color = indexAccent,
+                color = if (isHighlighted) LcarsOrange else indexAccent,
                 fontWeight = FontWeight.Bold,
             )
         }

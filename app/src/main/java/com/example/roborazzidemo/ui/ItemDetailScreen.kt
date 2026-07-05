@@ -33,6 +33,7 @@ fun ItemDetailScreen(
 ) {
     Scaffold(
         containerColor = Color.Transparent,
+        contentWindowInsets = AppScaffoldInsets,
         topBar = {
             AppTopBar(
                 title = item.title,

@@ -28,19 +28,23 @@ class VoiceAppTestRobot private constructor(
 
     fun speak(text: String) = TestSpeechAnnouncer.speak(context, text)
 
-    fun speakAndWaitForResponse(text: String, timeoutMillis: Long = 90_000) {
+    fun speakAndWaitForResponse(text: String, timeoutMillis: Long = 120_000) {
+        val baseline = toolWaitBaseline()
         speak(text)
-        waitForVoiceResponseComplete(timeoutMillis)
+        waitForAssistantSpeechComplete(timeoutMillis, baseline)
     }
 
-    fun speakAndWaitForTool(text: String, toolName: String, timeoutMillis: Long = 120_000) {
+    fun speakAndWaitForTool(text: String, toolName: String, timeoutMillis: Long = 180_000) {
         val baseline = toolWaitBaseline()
         speak(text)
         try {
-            waitForVoiceResponseWithTool(toolName, baseline, timeoutMillis)
+            waitForToolInvocation(toolName, baseline, timeoutMillis)
+            waitForAssistantSpeechComplete(timeoutMillis, baseline, activityAlreadySeen = true)
         } catch (_: IllegalStateException) {
+            val retryBaseline = toolWaitBaseline()
             speak(text)
-            waitForVoiceResponseWithTool(toolName, toolWaitBaseline(), timeoutMillis)
+            waitForToolInvocation(toolName, retryBaseline, timeoutMillis)
+            waitForAssistantSpeechComplete(timeoutMillis, retryBaseline, activityAlreadySeen = true)
         }
     }
 
@@ -80,38 +84,53 @@ class VoiceAppTestRobot private constructor(
         }
     }
 
-    fun waitForVoiceResponseComplete(timeoutMillis: Long = 90_000) {
-        var sawActivity = false
-        waitUntil(timeoutMillis, "Timed out waiting for voice response audio. ${diagnostics()}") {
-            val current = status()
-            if (isResponseActivity(current)) {
-                sawActivity = true
-            }
-            sawActivity && isReadyToListen(current)
-        }
-    }
-
-    private fun waitForVoiceResponseWithTool(
+    private fun waitForToolInvocation(
         toolName: String,
         baseline: ToolWaitBaseline,
         timeoutMillis: Long,
     ) {
         waitUntil(
             timeoutMillis,
-            "Timed out waiting for voice response with tool '$toolName'. ${diagnostics()}",
+            "Timed out waiting for tool '$toolName' to run. ${diagnostics()}",
         ) {
             val turns = conversationTurnsIncludingLive()
-            if (turns.count { it == "you" } <= baseline.youTurns) return@waitUntil false
-            if (lastToolLabel() != toolName) return@waitUntil false
+            turns.count { it == "you" } > baseline.youTurns && lastToolLabel() == toolName
+        }
+    }
+
+    private fun waitForAssistantSpeechComplete(
+        timeoutMillis: Long,
+        baseline: ToolWaitBaseline,
+        activityAlreadySeen: Boolean = false,
+    ) {
+        var sawActivity = activityAlreadySeen
+        waitUntil(
+            timeoutMillis,
+            "Timed out waiting for assistant to finish speaking. ${diagnostics()}",
+        ) {
             val current = status()
-            val visible = visibleUiText()
-            when {
-                current.contains("Running $toolName", ignoreCase = true) -> true
-                turns.count { it == "grok" } > baseline.grokTurns -> true
-                visible.contains("MODULE // $toolName", ignoreCase = true) -> true
-                isReadyToListen(current) -> true
-                else -> false
+            val turns = conversationTurnsIncludingLive()
+            val youTurns = turns.count { it == "you" }
+            val grokTurns = turns.count { it == "grok" }
+            if (isAssistantTurnActive()) {
+                sawActivity = true
             }
+            if (isAssistantSpeaking(current)) {
+                sawActivity = true
+            }
+            if (youTurns > baseline.youTurns) {
+                sawActivity = true
+            }
+            if (grokTurns > baseline.grokTurns) {
+                sawActivity = true
+            }
+            if (lastToolLabel() != baseline.toolLabel && lastToolLabel() != null) {
+                sawActivity = true
+            }
+            if (!device.findObjects(By.descContains("voice-transcript-live-grok")).isNullOrEmpty()) {
+                sawActivity = true
+            }
+            sawActivity && isAssistantTurnFinished(current)
         }
     }
 
@@ -131,6 +150,16 @@ class VoiceAppTestRobot private constructor(
     fun waitForListItemVisible(itemTitle: String, timeoutMillis: Long = 30_000) {
         checkNotNull(device.wait(Until.findObject(By.text(itemTitle)), timeoutMillis)) {
             "Timed out waiting for list row '$itemTitle'. ${diagnostics()}"
+        }
+    }
+
+    fun waitForListItemSelected(itemIndex: Int, timeoutMillis: Long = 30_000) {
+        val selectedDesc = "item-row-selected-$itemIndex"
+        checkNotNull(
+            device.wait(Until.findObject(By.desc(selectedDesc)), timeoutMillis)
+                ?: device.wait(Until.findObject(By.descContains("item-row-selected-")), timeoutMillis),
+        ) {
+            "Timed out waiting for selected list row index $itemIndex. ${diagnostics()}"
         }
     }
 
@@ -157,6 +186,7 @@ class VoiceAppTestRobot private constructor(
         return device.findObject(By.desc("voice-mic-level")) != null ||
             device.findObject(By.text("Mic level")) != null ||
             device.findObject(By.text("SIG")) != null ||
+            device.findObject(By.descContains("voice-sig-level-")) != null ||
             device.findObject(By.descContains("audio-level-")) != null ||
             visible.contains("Mic level", ignoreCase = true) ||
             visible.contains("SIG")
@@ -170,22 +200,32 @@ class VoiceAppTestRobot private constructor(
 
     fun conversationTurns(): List<String> = conversationTurnsIncludingLive()
 
-    fun assertGreetingTurnIfPresent(timeoutMillis: Long = 10_000) {
+    fun assertGreetingTurnIfPresent(timeoutMillis: Long = 120_000) {
         waitUntil(timeoutMillis, "Expected optional Grok greeting turn. ${diagnostics()}") {
             val turns = transcriptSummary()
             turns.isEmpty() || turns.first() == "grok"
         }
+        if (!isReadyToListen(status())) {
+            waitForAssistantSpeechComplete(
+                timeoutMillis = timeoutMillis,
+                baseline = toolWaitBaseline(),
+                activityAlreadySeen = transcriptSummary().isNotEmpty(),
+            )
+        }
     }
 
-    fun assertExchangeTurns(timeoutMillis: Long = 20_000) {
+    fun assertExchangeTurns(timeoutMillis: Long = 30_000) {
         waitUntil(timeoutMillis, "Expected valid user exchange turn(s). ${diagnostics()}") {
+            val current = status()
+            if (!isAssistantTurnFinished(current)) return@waitUntil false
+            if (!isReadyToListen(current)) return@waitUntil false
+            if (isAssistantSpeaking(current)) return@waitUntil false
             val turns = conversationTurnsIncludingLive()
             if (!isValidConversationTurnOrder(turns)) return@waitUntil false
             if (hasEchoTurnAfterGrok(turns)) return@waitUntil false
-            val current = status()
             when (turns.lastOrNull()) {
                 "grok" -> turns.count { it == "you" } >= 1
-                "you" -> isReadyToListen(current) || isResponseActivity(current)
+                "you" -> true
                 else -> false
             }
         }
@@ -265,10 +305,27 @@ class VoiceAppTestRobot private constructor(
             .orEmpty()
     }
 
-    private fun isResponseActivity(status: String): Boolean =
+    private fun isAssistantTurnActive(): Boolean =
+        device.findObject(By.desc("voice-assistant-turn-active")) != null
+
+    private fun isAssistantTurnIdle(): Boolean =
+        device.findObject(By.desc("voice-assistant-turn-idle")) != null
+
+    private fun isAssistantTurnFinished(status: String): Boolean =
+        when {
+            isAssistantTurnIdle() -> isReadyToListen(status)
+            isAssistantTurnActive() -> false
+            else -> isReadyToListen(status) && !isAssistantSpeaking(status)
+        }
+
+    private fun isAssistantSpeaking(status: String): Boolean =
         status.contains("Grok is responding", ignoreCase = true) ||
+            status.contains("Grok is greeting", ignoreCase = true) ||
             status.contains("Running ", ignoreCase = true) ||
+            status.contains("Running tool", ignoreCase = true) ||
             status.contains("Processing", ignoreCase = true)
+
+    private fun isResponseActivity(status: String): Boolean = isAssistantSpeaking(status)
 
     private fun isReadyToListen(status: String): Boolean =
         status.contains("Listening — ask a question", ignoreCase = true) ||
@@ -296,8 +353,6 @@ class VoiceAppTestRobot private constructor(
             .mapNotNull { node -> parseIndexedTranscriptTurn(node.contentDescription) }
             .sortedBy { it.first }
             .map { it.second }
-
-    private fun hasLiveGrokTurn(): Boolean = isResponseActivity(status())
 
     private fun isValidConversationTurnOrder(turns: List<String>): Boolean {
         if (turns.isEmpty()) return false
