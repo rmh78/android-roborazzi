@@ -30,6 +30,8 @@ data class VoiceUiState(
     val isConnected: Boolean = false,
     val status: String = "Disconnected",
     val isAssistantTurnActive: Boolean = false,
+    val isAssistantPlaybackActive: Boolean = false,
+    val isUserTurnAllowed: Boolean = false,
     val audioLevel: Float = 0f,
     val liveUserText: String = "",
     val liveAssistantText: String = "",
@@ -120,11 +122,14 @@ class VoiceAssistantViewModel(
                 isConnected = false,
                 status = "Disconnected",
                 isAssistantTurnActive = false,
+                isAssistantPlaybackActive = false,
+                isUserTurnAllowed = false,
                 audioLevel = 0f,
                 liveUserText = "",
                 liveAssistantText = "",
             )
         }
+        sessionUserTurnAllowed = false
     }
 
     override fun onSessionReady() {
@@ -152,20 +157,50 @@ class VoiceAssistantViewModel(
             } else {
                 state
             }
-            updated.copy(
-                status = status,
-                isAssistantTurnActive = assistantTurnActiveFromStatus(status),
-                errorMessage = if (status.equals("Error", ignoreCase = true)) updated.errorMessage else null,
+            applyUiUserTurnGate(
+                updated.copy(
+                    status = status,
+                    isAssistantTurnActive = assistantTurnActiveFromStatus(status),
+                    errorMessage = if (status.equals("Error", ignoreCase = true)) updated.errorMessage else null,
+                ),
             )
         }
     }
+
+    override fun onVoiceSyncChanged(assistantPlaybackActive: Boolean, userTurnAllowed: Boolean) {
+        sessionUserTurnAllowed = userTurnAllowed
+        _uiState.update { state ->
+            applyUiUserTurnGate(
+                state.copy(isAssistantPlaybackActive = assistantPlaybackActive),
+            )
+        }
+    }
+
+    private var sessionUserTurnAllowed: Boolean = false
+
+    private fun applyUiUserTurnGate(state: VoiceUiState): VoiceUiState {
+        val allowed = state.isConnected &&
+            sessionUserTurnAllowed &&
+            !state.isAssistantPlaybackActive &&
+            state.liveAssistantText.isBlank() &&
+            !userSpeechActive &&
+            userTurnAllowedFromStatus(state.status)
+        return state.copy(isUserTurnAllowed = allowed)
+    }
+
+    private fun userTurnAllowedFromStatus(status: String): Boolean =
+        when {
+            status.contains("Listening — ask a question", ignoreCase = true) -> true
+            status.equals("Listening", ignoreCase = true) -> true
+            else -> false
+        }
 
     override fun onUserSpeechStarted() {
         VoiceLog.ui("User speech started")
         userSpeechActive = true
         pendingUserTranscript = null
         assistantBlockStartIndex = null
-        _uiState.update { it.copy(liveAssistantText = "", liveUserText = "") }
+        _uiState.update { applyUiUserTurnGate(it.copy(liveAssistantText = "", liveUserText = "")) }
     }
 
     override fun onUserSpeechStopped() {
@@ -235,7 +270,7 @@ class VoiceAssistantViewModel(
             if (assistantBlockStartIndex == null) {
                 assistantBlockStartIndex = flushed.transcriptLines.size
             }
-            flushed.copy(liveAssistantText = flushed.liveAssistantText + delta)
+            applyUiUserTurnGate(flushed.copy(liveAssistantText = flushed.liveAssistantText + delta))
         }
     }
 
@@ -247,7 +282,7 @@ class VoiceAssistantViewModel(
         _uiState.update { state ->
             val flushed = flushLiveUserToLines(state)
             val text = flushed.liveAssistantText.trim()
-            if (text.isEmpty()) {
+            val updated = if (text.isEmpty()) {
                 flushed
             } else {
                 flushed.copy(
@@ -258,6 +293,7 @@ class VoiceAssistantViewModel(
                     ),
                 )
             }
+            applyUiUserTurnGate(updated)
         }
     }
 
@@ -312,10 +348,13 @@ class VoiceAssistantViewModel(
                 isConnected = false,
                 status = "Disconnected",
                 isAssistantTurnActive = false,
+                isAssistantPlaybackActive = false,
+                isUserTurnAllowed = false,
                 audioLevel = 0f,
                 errorMessage = reason,
             )
         }
+        sessionUserTurnAllowed = false
         session = null
     }
 

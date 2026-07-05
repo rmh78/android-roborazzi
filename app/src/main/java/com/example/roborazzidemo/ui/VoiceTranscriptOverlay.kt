@@ -132,6 +132,28 @@ fun VoiceTranscriptOverlay(
 
             if (state.isConnected) {
                 AssistantTurnIndicator(isActive = state.isAssistantTurnActive)
+                Box(
+                    modifier = Modifier
+                        .size(1.dp)
+                        .semantics(mergeDescendants = false) {
+                            contentDescription = if (state.isUserTurnAllowed) {
+                                "voice-user-turn-allowed"
+                            } else {
+                                "voice-user-turn-blocked"
+                            }
+                        },
+                )
+                Box(
+                    modifier = Modifier
+                        .size(1.dp)
+                        .semantics(mergeDescendants = false) {
+                            contentDescription = if (state.isAssistantPlaybackActive) {
+                                "voice-assistant-playback-active"
+                            } else {
+                                "voice-assistant-playback-idle"
+                            }
+                        },
+                )
             }
 
             state.errorMessage?.let { error ->

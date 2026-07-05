@@ -20,6 +20,12 @@ class PcmAudioPlayback {
     @Volatile
     private var totalFramesWritten: Long = 0
 
+    @Volatile
+    private var drainingPlayback = false
+
+    @Volatile
+    var onIdleChanged: ((Boolean) -> Unit)? = null
+
     fun playBase64Chunk(base64Audio: String) {
         if (base64Audio.isEmpty()) return
         val pcm16 = Base64.decode(base64Audio, Base64.NO_WRAP)
@@ -27,6 +33,7 @@ class PcmAudioPlayback {
             playbackQueue.add(pcm16)
             if (!isPlaying) {
                 isPlaying = true
+                notifyIdleChanged()
                 Thread { playNextChunk() }.start()
             }
         }
@@ -47,7 +54,9 @@ class PcmAudioPlayback {
                 VoiceLog.w("Playback", "AudioTrack.flush skipped: ${e.message}")
             }
             isPlaying = false
+            drainingPlayback = false
         }
+        notifyIdleChanged()
         VoiceLog.d("Playback", "Playback flushed (barge-in)")
     }
 
@@ -55,6 +64,7 @@ class PcmAudioPlayback {
         synchronized(lock) {
             playbackQueue.clear()
             isPlaying = false
+            drainingPlayback = false
             totalFramesWritten = 0
             releaseTrackLocked()
         }
@@ -62,10 +72,11 @@ class PcmAudioPlayback {
             VoiceLog.i("Playback", "Stopped (chunks_played=$chunksPlayed)")
         }
         chunksPlayed = 0
+        notifyIdleChanged()
     }
 
     fun isIdle(): Boolean = synchronized(lock) {
-        !isPlaying && playbackQueue.isEmpty()
+        !isPlaying && playbackQueue.isEmpty() && !drainingPlayback
     }
 
     fun whenIdle(onIdle: () -> Unit, postDrainDelayMs: Long = 0L) {
@@ -79,16 +90,24 @@ class PcmAudioPlayback {
                     }
                     Thread.sleep(PLAYBACK_IDLE_POLL_MS)
                 }
+                drainingPlayback = true
+                notifyIdleChanged()
                 waitForPlaybackDrain(postDrainDelayMs)
                 synchronized(lock) {
                     releaseTrackLocked()
                     totalFramesWritten = 0
                 }
+                drainingPlayback = false
                 VoiceLog.d("Playback", "Playback idle — ready for microphone capture")
+                notifyIdleChanged()
                 onIdle()
             },
             "voice-playback-idle",
         ).start()
+    }
+
+    private fun notifyIdleChanged() {
+        onIdleChanged?.invoke(isIdle())
     }
 
     private fun waitForPlaybackDrain(postDrainDelayMs: Long) {
@@ -99,12 +118,17 @@ class PcmAudioPlayback {
         }
         val targetFrames = totalFramesWritten
         if (targetFrames > 0) {
-            val deadline = System.currentTimeMillis() + PLAYBACK_DRAIN_TIMEOUT_MS
+            val audioDurationMs =
+                (targetFrames * 1_000L) / VoiceConstants.SAMPLE_RATE_HZ
+            val slackFrames = playbackDrainSlackFrames()
+            val deadline = System.currentTimeMillis() +
+                audioDurationMs +
+                postDrainDelayMs +
+                PLAYBACK_DRAIN_MARGIN_MS
             while (System.currentTimeMillis() < deadline) {
                 try {
-                    if (track.playState != AudioTrack.PLAYSTATE_PLAYING) break
                     val head = track.playbackHeadPosition.toLong()
-                    if (head + PLAYBACK_HEAD_SLACK_FRAMES >= targetFrames) break
+                    if (head + slackFrames >= targetFrames) break
                 } catch (e: IllegalStateException) {
                     VoiceLog.w("Playback", "Playback drain poll skipped: ${e.message}")
                     break
@@ -117,12 +141,23 @@ class PcmAudioPlayback {
         }
     }
 
+    private fun playbackDrainSlackFrames(): Long =
+        if (VoiceDeviceHints.isLikelyEmulator()) {
+            EMULATOR_PLAYBACK_HEAD_SLACK_FRAMES
+        } else {
+            PLAYBACK_HEAD_SLACK_FRAMES
+        }
+
     private fun playNextChunk() {
         while (true) {
             val chunk: ByteArray?
             synchronized(lock) {
                 if (playbackQueue.isEmpty()) {
                     isPlaying = false
+                    if (totalFramesWritten > 0) {
+                        drainingPlayback = true
+                    }
+                    notifyIdleChanged()
                     return
                 }
                 chunk = playbackQueue.poll()
@@ -206,7 +241,8 @@ class PcmAudioPlayback {
         private const val PLAYBACK_LOG_INTERVAL = 25
         private const val PLAYBACK_IDLE_POLL_MS = 50L
         private const val PLAYBACK_HEAD_POLL_MS = 20L
-        private const val PLAYBACK_DRAIN_TIMEOUT_MS = 2_000L
-        private const val PLAYBACK_HEAD_SLACK_FRAMES = 480L
+        private const val PLAYBACK_DRAIN_MARGIN_MS = 5_000L
+        private const val PLAYBACK_HEAD_SLACK_FRAMES = 2_400L
+        private const val EMULATOR_PLAYBACK_HEAD_SLACK_FRAMES = 24_000L
     }
 }
