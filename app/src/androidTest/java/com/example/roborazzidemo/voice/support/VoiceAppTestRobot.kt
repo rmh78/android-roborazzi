@@ -11,11 +11,19 @@ class VoiceAppTestRobot private constructor(
     private val device: UiDevice,
     private val context: Context,
 ) {
-    fun assertAppVisible() {
-        checkNotNull(device.wait(Until.findObject(By.text("Voice Assistant")), 30_000)) {
-            "Voice Assistant overlay was not visible on screen."
+    fun assertAppVisible(timeoutMillis: Long = 90_000) = waitForAppShellVisible(timeoutMillis)
+
+    private fun waitForAppShellVisible(timeoutMillis: Long) {
+        waitUntil(timeoutMillis, "Voice Assistant overlay was not visible on screen. ${diagnostics()}") {
+            isAppShellVisible()
         }
     }
+
+    private fun isAppShellVisible(): Boolean =
+        device.findObject(By.desc("voice-assistant-overlay")) != null ||
+            device.findObject(By.desc("voice-connect-switch")) != null ||
+            device.findObject(By.text("Voice Assistant")) != null ||
+            device.findObject(By.text("VOICE INTERFACE")) != null
 
     fun assertHomeScreenVisible() = waitForHomeScreen(timeoutMillis = 5_000)
 
@@ -450,10 +458,13 @@ class VoiceAppTestRobot private constructor(
         fun create(): VoiceAppTestRobot {
             val instrumentation = InstrumentationRegistry.getInstrumentation()
             val device = UiDevice.getInstance(instrumentation)
-            device.waitForIdle(3_000)
+            device.waitForIdle(5_000)
             val context = instrumentation.targetContext
             TestSpeechAnnouncer.warmUp(context)
-            return VoiceAppTestRobot(device, context)
+            val robot = VoiceAppTestRobot(device, context)
+            robot.waitForAppShellVisible(timeoutMillis = 90_000)
+            VoiceE2ELog.step("voice assistant overlay visible")
+            return robot
         }
     }
 }

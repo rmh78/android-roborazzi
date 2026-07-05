@@ -56,7 +56,8 @@ fun VoiceTranscriptOverlay(
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(16.dp)
-            .testTag("voice_assistant_overlay"),
+            .testTag("voice_assistant_overlay")
+            .semantics { contentDescription = "voice-assistant-overlay" },
     ) {
         Box(
             modifier = Modifier
