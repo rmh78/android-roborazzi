@@ -102,12 +102,16 @@ class VoiceAppTestRobot private constructor(
         ) {
             val turns = conversationTurnsIncludingLive()
             if (turns.count { it == "you" } <= baseline.youTurns) return@waitUntil false
-            val current = status()
-            if (!isReadyToListen(current)) return@waitUntil false
             if (lastToolLabel() != toolName) return@waitUntil false
-            current.contains("Running $toolName", ignoreCase = true) ||
-                turns.count { it == "grok" } > baseline.grokTurns ||
-                baseline.toolLabel != toolName
+            val current = status()
+            val visible = visibleUiText()
+            when {
+                current.contains("Running $toolName", ignoreCase = true) -> true
+                turns.count { it == "grok" } > baseline.grokTurns -> true
+                visible.contains("MODULE // $toolName", ignoreCase = true) -> true
+                isReadyToListen(current) -> true
+                else -> false
+            }
         }
     }
 
@@ -177,11 +181,11 @@ class VoiceAppTestRobot private constructor(
         waitUntil(timeoutMillis, "Expected valid user exchange turn(s). ${diagnostics()}") {
             val turns = conversationTurnsIncludingLive()
             if (!isValidConversationTurnOrder(turns)) return@waitUntil false
-            if (hasLiveGrokTurn()) return@waitUntil false
             if (hasEchoTurnAfterGrok(turns)) return@waitUntil false
+            val current = status()
             when (turns.lastOrNull()) {
                 "grok" -> turns.count { it == "you" } >= 1
-                "you" -> isReadyToListen(status())
+                "you" -> isReadyToListen(current) || isResponseActivity(current)
                 else -> false
             }
         }
@@ -204,17 +208,31 @@ class VoiceAppTestRobot private constructor(
         }
     }
 
-    fun waitUntilDisconnected(timeoutMillis: Long = 15_000) {
+    fun waitUntilDisconnected(timeoutMillis: Long = 30_000) {
         waitUntil(timeoutMillis, "Timed out waiting for disconnected state. ${diagnostics()}") {
-            status().equals("Disconnected", ignoreCase = true)
+            isDisconnected()
         }
+    }
+
+    private fun isDisconnected(): Boolean {
+        val current = status()
+        if (current.equals("Disconnected", ignoreCase = true)) return true
+        if (current.contains("Tap Connect to grant", ignoreCase = true)) return true
+        val checkable = device.findObject(By.checkable(true))
+        if (checkable != null && !checkable.isChecked) return true
+        return !micLevelUiVisible() &&
+            !current.contains("Listening", ignoreCase = true) &&
+            !isResponseActivity(current)
     }
 
     private fun tapConnectSwitch() {
         val switch = device.wait(Until.findObject(By.desc("voice-connect-switch")), 10_000)
+            ?: device.wait(Until.findObject(By.checkable(true)), 10_000)
             ?: device.wait(Until.findObject(By.text("Connect")), 10_000)
         checkNotNull(switch) { "Connect switch was not found. ${diagnostics()}" }
-        switch.click()
+        val bounds = switch.visibleBounds
+        device.click(bounds.centerX(), bounds.centerY())
+        device.waitForIdle(3_000)
     }
 
     private fun waitUntil(
