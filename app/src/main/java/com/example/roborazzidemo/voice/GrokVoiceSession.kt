@@ -684,16 +684,17 @@ class GrokVoiceSession(
             playbackFinalizeJob?.cancel()
             playbackFinalizeJob = null
             resumeMicAfterEmulatorHalfDuplex()
-            if (micGate.shouldResumeMicAfterSpokenInject()) {
-                micGate.onCaptureResumed()
+            when {
+                micGate.shouldResumeMicAfterSpokenInject() -> micGate.onCaptureResumed()
+                micGate.state != MicCaptureGate.State.Streaming -> micGate.onCaptureResumed()
             }
             if (!VoiceDeviceHints.useHalfDuplexVoice() && audioCapture.isMuted()) {
                 audioCapture.setMuted(false)
             }
+            publishVoiceSync()
             listener.onStatusChanged(
                 if (hadAudio) "Listening — ask a question" else "Listening",
             )
-            publishVoiceSync()
         }
         if (hadAudio || !audioPlayback.isIdle()) {
             audioPlayback.whenIdle(

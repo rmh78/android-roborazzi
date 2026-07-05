@@ -101,9 +101,7 @@ class VoiceAppTestRobot private constructor(
         speak(text)
         waitForUserTurnRegistered(baseline, timeoutMillis / 4)
         waitForToolInvocation(toolName, baseline, timeoutMillis)
-        // Tool invocation is bounded by timeoutMillis; Grok may keep streaming audio
-        // well after the tool runs, especially late in a long CI session.
-        waitForAssistantSpeechComplete(SPEECH_COMPLETE_TIMEOUT_MILLIS, baseline, activityAlreadySeen = true)
+        waitForListeningPhase(timeoutMillis)
         VoiceE2ELog.detail("tool complete: tool=$toolName status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
     }
 
@@ -213,17 +211,17 @@ class VoiceAppTestRobot private constructor(
             if (!device.findObjects(By.descContains("voice-transcript-live-grok")).isNullOrEmpty()) {
                 sawActivity = true
             }
-            sawActivity && isListeningPhase()
+            sawActivity && isListeningReady()
         }
     }
 
     fun waitForListeningPhase(timeoutMillis: Long = 120_000) {
         waitUntil(
             timeoutMillis,
-            "Timed out waiting for voice-turn-phase-listening. ${diagnostics()}",
+            "Timed out waiting for listening-ready status. ${diagnostics()}",
         ) {
             assertConnectedDuringSync()
-            isListeningPhase()
+            isListeningReady()
         }
     }
 
@@ -335,7 +333,7 @@ class VoiceAppTestRobot private constructor(
     }
 
     private fun exchangeTurnsReady(): Boolean =
-        exchangeTurnsRecorded() && isListeningPhase()
+        exchangeTurnsRecorded() && isListeningReady()
 
     fun assertConversationTurnCounts(
         minYou: Int,
@@ -414,9 +412,13 @@ class VoiceAppTestRobot private constructor(
     private fun isAssistantTurnActive(): Boolean =
         device.findObject(By.desc("voice-assistant-turn-active")) != null
 
-    private fun isListeningPhase(): Boolean =
-        device.findObject(By.desc("voice-turn-phase-listening")) != null &&
-            !hasLiveGrokTranscript()
+    /** Status line is authoritative — Compose phase nodes can lag or go stale in UiAutomator. */
+    private fun isListeningReady(): Boolean {
+        val current = status()
+        return isReadyToListen(current) &&
+            !isAssistantSpeaking(current) &&
+            !isUserSpeaking(current)
+    }
 
     private fun isAssistantPhase(): Boolean =
         device.findObject(By.desc("voice-turn-phase-assistant")) != null

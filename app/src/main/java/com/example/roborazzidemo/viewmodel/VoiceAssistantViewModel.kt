@@ -200,7 +200,13 @@ class VoiceAssistantViewModel(
             userSpeechActive ||
                 state.status.contains("You are speaking", ignoreCase = true) ||
                 state.status.contains("Processing", ignoreCase = true) -> VoiceTurnPhase.User
-            allowed -> VoiceTurnPhase.Listening
+            allowed ||
+                (
+                    userTurnAllowedFromStatus(state.status) &&
+                        !state.isAssistantPlaybackActive &&
+                        state.liveAssistantText.isBlank() &&
+                        !assistantPhaseStatus(state.status)
+                    ) -> VoiceTurnPhase.Listening
             else -> VoiceTurnPhase.Assistant
         }
         return state.copy(isUserTurnAllowed = allowed, turnPhase = phase)
