@@ -684,7 +684,7 @@ class GrokVoiceSession(
         private const val RESPONSE_CREATE_TIMEOUT_MS = 20_000L
         private const val TOOL_FOLLOWUP_TIMEOUT_MS = 60_000L
         private const val PLAYBACK_FINALIZE_TIMEOUT_MS = 45_000L
-        private const val RESPONDING_STALL_TIMEOUT_MS = 75_000L
+        private const val RESPONDING_STALL_TIMEOUT_MS = 45_000L
         private const val AUDIO_CHUNK_LOG_INTERVAL = 50
         private const val PROCESSING_MIC_PULSE_MS = 1_500L
 

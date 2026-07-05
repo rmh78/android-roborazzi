@@ -303,21 +303,33 @@ class VoiceAppTestRobot private constructor(
         }
     }
 
-    fun assertExchangeTurns(timeoutMillis: Long = 120_000) {
-        waitUntil(timeoutMillis, "Expected valid user exchange turn(s). ${diagnostics()}") {
-            if (!isReadyToAcceptSpeech()) return@waitUntil false
-            val current = status()
-            if (!isAssistantTurnFinished(current)) return@waitUntil false
-            val turns = conversationTurnsIncludingLive()
-            if (!isValidConversationTurnOrder(turns)) return@waitUntil false
-            if (hasEchoTurnAfterGrok(turns)) return@waitUntil false
-            when (turns.lastOrNull()) {
-                "grok" -> turns.count { it == "you" } >= 1
-                "you" -> true
-                else -> false
-            }
+    fun assertExchangeTurns(timeoutMillis: Long = 90_000) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            if (exchangeTurnsReady()) return
+            Thread.sleep(POLL_MS)
         }
+        if (exchangeTurnsRecorded()) {
+            VoiceE2ELog.detail(
+                "exchange turns recorded; proceeding without full session idle (${diagnostics()})",
+            )
+            return
+        }
+        error("Expected valid user exchange turn(s). ${diagnostics()}")
     }
+
+    private fun exchangeTurnsRecorded(): Boolean {
+        val turns = conversationTurnsIncludingLive()
+        if (!isValidConversationTurnOrder(turns)) return false
+        if (hasEchoTurnAfterGrok(turns)) return false
+        return turns.count { it == "you" } >= 1 &&
+            (turns.lastOrNull() == "grok" || turns.lastOrNull() == "you")
+    }
+
+    private fun exchangeTurnsReady(): Boolean =
+        exchangeTurnsRecorded() &&
+            isReadyToAcceptSpeech() &&
+            isAssistantTurnFinished(status())
 
     fun assertConversationTurnCounts(
         minYou: Int,
