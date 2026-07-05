@@ -141,6 +141,8 @@ The test uses emulator TTS plus debug `VOICE_SPOKEN` injects to simulate user sp
 
 Optional: disable TTS playback (inject only) with `-Pandroid.testInstrumentationRunnerArguments.disableTestSpeechPlayback=true`.
 
+**CI:** Pull requests run this test in the [Voice integration test](.github/workflows/voice-integration-test.yml) workflow on a hardware-accelerated emulator. Add an `XAI_API_KEY` [repository secret](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions) so the job can reach the live API; without it the workflow fails fast instead of skipping the test.
+
 ### Debug broadcasts (debug builds)
 
 | Action | Purpose |
