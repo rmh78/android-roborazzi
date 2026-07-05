@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
+import com.example.roborazzidemo.ui.VoiceOverlayChrome
 import com.example.roborazzidemo.ui.futuristic.FuturisticBackground
+import com.example.roborazzidemo.viewmodel.VoiceUiState
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -47,6 +49,7 @@ abstract class RoborazziComposeTest {
                 Box(Modifier.fillMaxSize()) {
                     FuturisticBackground(Modifier.fillMaxSize())
                     content()
+                    VoiceOverlayChrome(state = VoiceUiState.RoborazziDisconnected)
                 }
             }
         }

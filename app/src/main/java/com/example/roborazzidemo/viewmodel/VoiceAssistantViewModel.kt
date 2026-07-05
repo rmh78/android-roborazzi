@@ -37,7 +37,16 @@ data class VoiceUiState(
     val errorMessage: String? = null,
     val hasApiKey: Boolean = true,
     val hasMicrophonePermission: Boolean = false,
-)
+) {
+    companion object {
+        val RoborazziDisconnected = VoiceUiState(
+            isConnected = false,
+            status = "Disconnected",
+            hasApiKey = true,
+            hasMicrophonePermission = true,
+        )
+    }
+}
 
 class VoiceAssistantViewModel(
     private val apiKey: String,

@@ -4,7 +4,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.example.roborazzidemo.ui.VoiceOverlayChrome
 import com.example.roborazzidemo.ui.futuristic.FuturisticBackground
+import com.example.roborazzidemo.viewmodel.VoiceUiState
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -61,6 +63,7 @@ class AppNavHostTest : RoborazziComposeTest() {
                 Box(Modifier.fillMaxSize()) {
                     FuturisticBackground(Modifier.fillMaxSize())
                     AppNavHost(navController = navController)
+                    VoiceOverlayChrome(state = VoiceUiState.RoborazziDisconnected)
                 }
             }
         }

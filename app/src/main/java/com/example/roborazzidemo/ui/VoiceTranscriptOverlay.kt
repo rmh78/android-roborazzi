@@ -25,7 +25,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -33,6 +32,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.roborazzidemo.theme.NexusNeonCyan
+import com.example.roborazzidemo.theme.NexusNeonMagenta
+import com.example.roborazzidemo.theme.NexusOverlayInset
+import com.example.roborazzidemo.theme.NexusOverlayPanel
+import com.example.roborazzidemo.theme.NexusOverlayText
+import com.example.roborazzidemo.theme.NexusOverlayTextDim
 import com.example.roborazzidemo.ui.futuristic.ChamferedPanelShape
 import com.example.roborazzidemo.viewmodel.TranscriptLine
 import com.example.roborazzidemo.viewmodel.TranscriptRole
@@ -52,26 +57,26 @@ fun VoiceTranscriptOverlay(
             .padding(16.dp)
             .testTag("voice_assistant_overlay"),
         shape = shape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.88f),
+        color = NexusOverlayPanel,
         border = BorderStroke(
             1.dp,
             Brush.linearGradient(
                 colors = listOf(
-                    MaterialTheme.colorScheme.primary,
-                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
+                    NexusNeonCyan.copy(alpha = 0.7f),
+                    NexusNeonMagenta.copy(alpha = 0.4f),
                 ),
             ),
         ),
         tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
+        shadowElevation = 8.dp,
     ) {
         Column(
             modifier = Modifier
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-                            Color.Transparent,
+                            NexusOverlayInset.copy(alpha = 0.6f),
+                            NexusOverlayPanel,
                         ),
                     ),
                 )
@@ -87,13 +92,13 @@ fun VoiceTranscriptOverlay(
                     Text(
                         text = "◈ NEURAL LINK",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = NexusNeonCyan,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
                         text = "Voice Assistant",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = NexusOverlayTextDim,
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -101,9 +106,9 @@ fun VoiceTranscriptOverlay(
                         "LINK",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (state.isConnected) {
-                            MaterialTheme.colorScheme.primary
+                            NexusNeonCyan
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                            NexusOverlayTextDim
                         },
                     )
                     Switch(
@@ -111,9 +116,10 @@ fun VoiceTranscriptOverlay(
                         onCheckedChange = onConnectChange,
                         enabled = state.hasApiKey,
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = MaterialTheme.colorScheme.primary,
-                            checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                            uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            checkedThumbColor = NexusNeonCyan,
+                            checkedTrackColor = NexusNeonCyan.copy(alpha = 0.35f),
+                            uncheckedThumbColor = NexusOverlayTextDim,
+                            uncheckedTrackColor = NexusOverlayInset,
                         ),
                         modifier = Modifier
                             .testTag("voice_connect_switch")
@@ -125,7 +131,7 @@ fun VoiceTranscriptOverlay(
             Text(
                 text = disconnectedStatus(state),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = NexusOverlayTextDim,
                 modifier = Modifier
                     .testTag("voice_status_text")
                     .semantics {
@@ -146,7 +152,7 @@ fun VoiceTranscriptOverlay(
                     Text(
                         "SIG",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.secondary,
+                        color = NexusNeonMagenta,
                     )
                     Box(
                         modifier = Modifier
@@ -156,8 +162,8 @@ fun VoiceTranscriptOverlay(
                             .background(
                                 Brush.horizontalGradient(
                                     colors = listOf(
-                                        MaterialTheme.colorScheme.primary,
-                                        MaterialTheme.colorScheme.secondary,
+                                        NexusNeonCyan,
+                                        NexusNeonMagenta,
                                     ),
                                 ),
                                 RoundedCornerShape(4.dp),
@@ -173,7 +179,7 @@ fun VoiceTranscriptOverlay(
                     Text(
                         text = "MODULE // ${state.lastToolName}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = NexusNeonCyan,
                         modifier = Modifier.semantics {
                             contentDescription = "voice-last-tool-${state.lastToolName}"
                         },
@@ -203,6 +209,8 @@ fun VoiceTranscriptOverlay(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(160.dp)
+                        .background(NexusOverlayInset, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
                         .verticalScroll(scrollState),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -250,8 +258,8 @@ private fun LiveTranscriptLine(
 ) {
     val role = prefix.lowercase()
     val prefixColor = when (prefix) {
-        "You" -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.secondary
+        "You" -> NexusNeonCyan
+        else -> NexusNeonMagenta
     }
     val prefixLabel = when (prefix) {
         "You" -> "USR"
@@ -275,7 +283,7 @@ private fun LiveTranscriptLine(
         Text(
             text = text,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = NexusOverlayText,
         )
     }
 }
