@@ -137,7 +137,12 @@ fun VoiceTranscriptOverlay(
             }
 
             if (state.isConnected) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.semantics {
+                        contentDescription = "voice-mic-level"
+                    },
+                ) {
                     Text(
                         "SIG",
                         style = MaterialTheme.typography.labelSmall,

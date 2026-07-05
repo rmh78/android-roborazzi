@@ -143,12 +143,19 @@ class VoiceAppTestRobot private constructor(
     }
 
     fun assertConnectedVoiceChromeVisible() {
-        check(
-            device.findObject(By.text("Mic level")) != null ||
-                visibleUiText().contains("Mic level", ignoreCase = true),
-        ) {
-            "Expected mic level UI while connected. ${diagnostics()}"
+        waitUntil(10_000, "Expected mic level UI while connected. ${diagnostics()}") {
+            micLevelUiVisible()
         }
+    }
+
+    private fun micLevelUiVisible(): Boolean {
+        val visible = visibleUiText()
+        return device.findObject(By.desc("voice-mic-level")) != null ||
+            device.findObject(By.text("Mic level")) != null ||
+            device.findObject(By.text("SIG")) != null ||
+            device.findObject(By.descContains("audio-level-")) != null ||
+            visible.contains("Mic level", ignoreCase = true) ||
+            visible.contains("SIG")
     }
 
     fun assertLastToolWas(toolName: String) {
