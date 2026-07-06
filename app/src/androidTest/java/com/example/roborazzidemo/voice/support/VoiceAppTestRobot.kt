@@ -76,11 +76,11 @@ class VoiceAppTestRobot private constructor(
     fun assertHomeScreenVisible() = waitForHomeScreen(timeoutMillis = 5_000)
 
     fun connect() {
-        tapConnectSwitch()
+        tapConnectSwitch(turnOn = true)
         waitForConnectionStarted()
     }
 
-    fun disconnect() = tapConnectSwitch()
+    fun disconnect() = tapConnectSwitch(turnOn = false)
 
     fun speak(text: String) = TestSpeechAnnouncer.speak(context, text)
 
@@ -124,11 +124,12 @@ class VoiceAppTestRobot private constructor(
         )
     }
 
-    fun waitForConnectionStarted(timeoutMillis: Long = 15_000) {
+    fun waitForConnectionStarted(timeoutMillis: Long = 30_000) {
         waitUntil(timeoutMillis, "Timed out waiting for voice connection to start. ${diagnostics()}") {
             val current = status()
             !current.equals("Disconnected", ignoreCase = true) &&
-                !current.contains("Tap Connect to grant", ignoreCase = true)
+                !current.contains("Tap Connect to grant", ignoreCase = true) &&
+                !current.isBlank()
         }
     }
 
@@ -369,15 +370,22 @@ class VoiceAppTestRobot private constructor(
             !isResponseActivity(current)
     }
 
-    private fun tapConnectSwitch() {
-        val switch = device.wait(Until.findObject(By.desc("voice-connect-switch")), 10_000)
-            ?: device.wait(Until.findObject(By.checkable(true)), 10_000)
-            ?: device.wait(Until.findObject(By.text("Connect")), 10_000)
-        checkNotNull(switch) { "Connect switch was not found. ${diagnostics()}" }
-        val bounds = switch.visibleBounds
+    private fun tapConnectSwitch(turnOn: Boolean) {
+        val toggle = waitForConnectSwitch()
+            ?: error("Connect switch was not found. ${diagnostics()}")
+        if (!toggle.isEnabled) {
+            error("Connect switch is disabled — is XAI_API_KEY set at build time? ${diagnostics()}")
+        }
+        if (turnOn == toggle.isChecked) return
+        // Compose Switch ignores UiObject.click(); coordinate tap on the checkable node works.
+        val bounds = toggle.visibleBounds
         device.click(bounds.centerX(), bounds.centerY())
-        device.waitForIdle(3_000)
+        device.waitForIdle(2_000)
     }
+
+    /** Prefer the clickable checkable node — not the inner semantics-only child. */
+    private fun waitForConnectSwitch() =
+        device.wait(Until.findObject(By.checkable(true)), 10_000)
 
     private fun waitUntil(
         timeoutMillis: Long,

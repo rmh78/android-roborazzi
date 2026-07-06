@@ -181,6 +181,10 @@ Hardware AEC plus the voice-communication audio path is what makes always-on, ha
 
 A single instrumented E2E test connects to the live API, exercises every nav screen and voice tool, validates conversation turn order (You → Grok), and disconnects. Requires `XAI_API_KEY`, a running emulator/device, and network.
 
+<video controls width="100%" src="docs/voice-integration-test.mp4"></video>
+
+*Recorded on an Android emulator: connect → describe_screen → weather → navigate list/detail → scroll item → not-found → home → disconnect (~2½ min).*
+
 ```bash
 adb shell am force-stop com.example.roborazzidemo
 
@@ -189,6 +193,13 @@ adb shell am force-stop com.example.roborazzidemo
 ```
 
 The test uses emulator TTS plus debug `VOICE_SPOKEN` injects to simulate user speech. Typical runtime is 2–5 minutes.
+
+Record a fresh demo video for the README:
+
+```bash
+export XAI_API_KEY=your-key-here
+bash scripts/record-voice-integration-test-video.sh
+```
 
 Optional: disable TTS playback (inject only) with `-Pandroid.testInstrumentationRunnerArguments.disableTestSpeechPlayback=true`.
 
