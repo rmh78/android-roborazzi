@@ -142,6 +142,12 @@ See [docs/voice-assistant.md](docs/voice-assistant.md) for the echo-loop diagram
 
 A single instrumented E2E test connects to the live API, exercises every nav screen and voice tool, validates conversation turn order (You → Grok), and disconnects. Requires `XAI_API_KEY`, a running emulator/device, and network.
 
+<video src="docs/voice-integration-test.mp4" controls width="100%">
+  <a href="docs/voice-integration-test.mp4">Download voice integration test recording</a>
+</video>
+
+The recording above shows the full E2E run on an emulator: connect, every voice tool (`describe_screen`, `web_search`, `navigate_to_screen`, `open_list_item`), navigation across all screens, turn-order validation, and disconnect. Audio includes emulator TTS prompts and Grok spoken replies.
+
 ```bash
 adb shell am force-stop com.example.roborazzidemo
 
