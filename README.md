@@ -1,8 +1,10 @@
 # android-roborazzi
 
-A small Jetpack Compose demo app showing how to use [Roborazzi](https://github.com/takahirom/roborazzi) for screenshot regression testing on the JVM with Robolectric — no emulator required.
+A reference project for **two complementary Android test strategies** on the same codebase: [Roborazzi](https://github.com/takahirom/roborazzi) JVM screenshot regression for Compose UI, and instrumented emulator E2E for live voice-agent integration.
 
-The app navigates between a home screen, an item list, item details, and a not-found screen. Tests capture golden images and verify them on every run.
+The demo app navigates between a home screen, an item list, item details, and a not-found screen, with an optional Grok Voice Agent overlay for hands-free navigation.
+
+**For AI agents & contributors:** see [AGENTS.md](AGENTS.md) for architecture, conventions, and detailed technical reference.
 
 ## Stack
 
@@ -57,7 +59,7 @@ Commit the updated `app/src/screenshots/*.webp` files together with your code ch
 | `ItemDetailScreenTest` | Sample item and long description |
 | `AppNavHostTest` | Navigation flows with interaction assertions + screenshots |
 
-Tests share a common setup in `RoborazziComposeTest` (Pixel 5, SDK 33, native graphics, WebP output). Screenshot names live in `GoldenImages.kt`.
+Tests share a common setup in `RoborazziComposeTest` (Pixel 5, SDK 33, native graphics, WebP output). Screenshot names live in `GoldenImages.kt`. See [docs/screenshot-testing.md](docs/screenshot-testing.md) for full coverage, record/verify workflow, and CI details.
 
 ## CI
 
@@ -71,7 +73,7 @@ GitHub Actions runs Roborazzi tests on every push to `main` and on pull requests
 
 When a pull request fails screenshot tests, [`.github/workflows/roborazzi-comment.yml`](.github/workflows/roborazzi-comment.yml) posts a comment on the PR with inline diff images (`*_compare.webp`). No need to download artifacts for a quick visual review.
 
-For the full report, download the `roborazzi-diffs` artifact from the failed run and open `reports/roborazzi/debug/index.html`.
+For the full report, download the `roborazzi-diffs` artifact from the failed run and open `reports/roborazzi/debug/index.html`. See [docs/ci-and-development.md](docs/ci-and-development.md) for workflow and script details.
 
 ## Project layout
 
@@ -88,6 +90,8 @@ app/
         ├── VoiceAppIntegrationTest.kt
         └── support/                # UiAutomator robot + TTS test harness
 ```
+
+See [docs/architecture.md](docs/architecture.md) for composition root, navigation graph, and how both test harnesses share the same UI.
 
 ## Voice assistant (Grok Voice Agent API)
 
@@ -126,56 +130,13 @@ The overlay shows live **You** / **Grok** transcript turns, mic level, status, a
 
 Session config uses `grok-voice-latest`, voice `eve`, server VAD, and an **Answer brief.** instruction for short spoken replies.
 
-### Emulator vs physical device (echo and duplex)
+### Emulator vs physical device
 
-Voice behaves very differently on an AVD than on a real phone. The app detects emulators via [`VoiceDeviceHints`](app/src/main/java/com/example/roborazzidemo/voice/VoiceDeviceHints.kt) and picks an audio strategy per platform.
+Voice behaves very differently on an AVD than on a real phone. Emulators use **half-duplex** (mic muted while Grok speaks; no barge-in) to avoid echo loops. Physical devices use **full-duplex** with hardware AEC and barge-in for natural conversation.
 
-#### The emulator echo problem
+Expect turn-taking on emulators: wait for **Listening — ask a question** before you speak. Use headphones when testing on an AVD.
 
-Android emulators do not provide working acoustic echo cancellation. On a typical Mac setup the loop looks like this:
-
-```
-Grok speaks (emulator speaker)
-  → host speakers play audio
-    → Mac microphone picks it up
-      → AVD virtual mic forwards it back
-        → Grok hears its own reply and responds again
-```
-
-You get an echo loop, phantom user turns, or Grok answering itself. Mitigations like VAD tuning, stream attenuation, or keeping the mic hot for barge-in are not enough on their own.
-
-Emulators also have fragile capture:
-
-- `VOICE_COMMUNICATION` (the xAI demo default on hardware) is often **silent** on AVDs, so capture falls back to `MIC`.
-- `MODE_IN_COMMUNICATION` routing can silence the virtual microphone, so the app keeps the default route on emulators.
-
-**What this app does on emulators:** **half-duplex** mode in [`GrokVoiceSession`](app/src/main/java/com/example/roborazzidemo/voice/GrokVoiceSession.kt):
-
-- Mute the mic while Grok is speaking (`response.created` / audio deltas).
-- Resume after playback drains plus a short tail delay (~450 ms).
-- Do **not** send `input_audio_buffer.clear` — server VAD still owns committed audio.
-- No barge-in — you cannot talk over Grok on an emulator.
-
-That trades natural conversation for stability. Expect turn-taking: wait for **Listening — ask a question** before you speak.
-
-**Tips when testing on an AVD:**
-
-- Extended Controls → Microphone → enable *Virtual microphone uses host audio input* if you need host mic passthrough.
-- Use headphones so emulator speech does not feed the host mic.
-- Lower host mic gain in macOS Sound settings.
-- For CI and scripted runs, prefer TTS + `VOICE_SPOKEN` injects (see below) over live host audio.
-
-#### The magic on a real device
-
-On a physical phone the same code path follows the [xAI Android Voice demo](https://github.com/xai-org/xai-cookbook/tree/main/Android/VoiceApiAndroidExample) closely:
-
-- **Audio route:** `MODE_IN_COMMUNICATION` with speakerphone on ([`VoiceAudioRoute`](app/src/main/java/com/example/roborazzidemo/voice/VoiceAudioRoute.kt)).
-- **Mic source:** `VOICE_COMMUNICATION` with platform **AEC**, noise suppression, and automatic gain control ([`PcmAudioCapture`](app/src/main/java/com/example/roborazzidemo/voice/PcmAudioCapture.kt)).
-- **Full duplex:** the mic streams continuously; nothing is muted client-side between turns.
-- **Barge-in:** if you start speaking while Grok is talking, playback is flushed and your speech takes over.
-- **Server VAD:** turn detection stays on the server; the client does not implement its own end-of-utterance logic.
-
-Hardware AEC plus the voice-communication audio path is what makes always-on, hands-free conversation work without echo loops. That is the “magic” you do not get on an emulator — use a real device when validating natural voice UX.
+See [docs/voice-assistant.md](docs/voice-assistant.md) for the echo-loop diagram, audio routing details, debug broadcasts, and tool execution paths.
 
 ### Voice integration test (emulator)
 
@@ -192,7 +153,7 @@ The test uses emulator TTS plus debug `VOICE_SPOKEN` injects to simulate user sp
 
 Optional: disable TTS playback (inject only) with `-Pandroid.testInstrumentationRunnerArguments.disableTestSpeechPlayback=true`.
 
-**CI:** Pull requests run this test in the [Voice integration test](.github/workflows/voice-integration-test.yml) workflow on a hardware-accelerated emulator. Add an `XAI_API_KEY` [repository secret](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions) so the job can reach the live API; without it the workflow fails fast instead of skipping the test.
+**CI:** Pull requests run this test on a hardware-accelerated emulator. Add an `XAI_API_KEY` [repository secret](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions); without it the workflow fails fast. See [docs/voice-e2e-testing.md](docs/voice-e2e-testing.md) for the robot harness, semantics contract, and [docs/ci-and-development.md](docs/ci-and-development.md) for workflow details.
 
 ### Debug broadcasts (debug builds)
 
@@ -201,6 +162,8 @@ Optional: disable TTS playback (inject only) with `-Pandroid.testInstrumentation
 | `com.example.roborazzidemo.VOICE_SPOKEN` | Inject a spoken user turn (`text` extra) |
 | `com.example.roborazzidemo.VOICE_TEXT` | Inject a text turn (direct-speech debug path) |
 | `com.example.roborazzidemo.VOICE_DISCONNECT` | Disconnect the voice session |
+
+Full broadcast list and tool architecture: [docs/voice-assistant.md](docs/voice-assistant.md).
 
 ## License
 

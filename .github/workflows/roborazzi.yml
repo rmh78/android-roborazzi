@@ -4,7 +4,25 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - 'scripts/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradlew'
+      - 'gradlew.bat'
   pull_request:
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - 'scripts/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradlew'
+      - 'gradlew.bat'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
