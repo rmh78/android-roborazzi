@@ -70,6 +70,7 @@ VoiceAppIntegrationTest           # single live voice E2E test
 
 ## Agent conventions
 
+- **Branch and PR for every change** — Never commit directly to `main`. For each distinct change: create a new branch from `main`, implement the change, push the branch, and open a GitHub pull request targeting `main`. One logical change per branch and PR.
 - **Manual DI** in `VoiceAssistantRoot` — no Hilt; wire dependencies with `remember` + `ViewModel.Factory`.
 - **Shared controllers** — `NavHostController` and `ItemListScrollController` are shared between UI and voice tools.
 - **`TrackScreenContent`** — every `NavHost` destination must register screen elements for `describe_screen`.
