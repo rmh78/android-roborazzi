@@ -26,8 +26,7 @@ object TestSpeechAnnouncer {
     fun speak(context: Context, text: String) {
         dispatchOrderedPcm(
             context = context,
-            intent = Intent(VoiceDebugReceiver.ACTION_VOICE_PCM_SPEAK)
-                .setPackage(context.packageName)
+            intent = pcmIntent(context, VoiceDebugReceiver.ACTION_VOICE_PCM_SPEAK)
                 .putExtra(VoiceDebugReceiver.EXTRA_TEXT, text),
             failureLabel = "PCM speech for \"$text\"",
         )
@@ -36,8 +35,7 @@ object TestSpeechAnnouncer {
     fun speakPcmBytes(context: Context, pcm: ByteArray) {
         dispatchOrderedPcm(
             context = context,
-            intent = Intent(VoiceDebugReceiver.ACTION_VOICE_PCM_BYTES)
-                .setPackage(context.packageName)
+            intent = pcmIntent(context, VoiceDebugReceiver.ACTION_VOICE_PCM_BYTES)
                 .putExtra(
                     VoiceDebugReceiver.EXTRA_PCM,
                     android.util.Base64.encodeToString(pcm, android.util.Base64.NO_WRAP),
@@ -45,6 +43,15 @@ object TestSpeechAnnouncer {
             failureLabel = "PCM bytes (${pcm.size} bytes)",
         )
     }
+
+    private fun pcmIntent(context: Context, action: String): Intent =
+        Intent(action)
+            .setPackage(context.packageName)
+            .apply {
+                if (VoiceE2eConfig.isAudiblePromptsEnabled()) {
+                    putExtra(VoiceDebugReceiver.EXTRA_MIRROR_PCM, true)
+                }
+            }
 
     private fun dispatchOrderedPcm(context: Context, intent: Intent, failureLabel: String) {
         val latch = CountDownLatch(1)

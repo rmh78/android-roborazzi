@@ -393,6 +393,7 @@ class VoiceAssistantViewModel(
         VoiceDebugBridge.sendTextCommand = null
         VoiceDebugBridge.sendPcmUtterance = null
         VoiceDebugBridge.disconnectCommand = null
+        VoiceDebugBridge.releasePcmChunkMirror()
     }
 
     private fun commitUserTranscript(text: String, appendOnly: Boolean = false) {

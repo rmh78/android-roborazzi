@@ -6,4 +6,8 @@ object VoiceE2eConfig {
     /** When true, run a minimal connect → tool → nav → disconnect path (~1 min). */
     fun isShortMode(): Boolean =
         InstrumentationRegistry.getArguments().getString("voiceE2eShort") == "true"
+
+    /** When true, play each user PCM utterance on the device speaker (same bytes as xAI). */
+    fun isAudiblePromptsEnabled(): Boolean =
+        InstrumentationRegistry.getArguments().getString("voiceE2eAudiblePrompts") == "true"
 }

@@ -31,15 +31,14 @@ class VoiceDebugReceiver : BroadcastReceiver() {
                 pending.finish()
                 return@generate
             }
-            val accepted = VoiceDebugBridge.dispatchPcm(pcm) {
-                VoiceLog.i("Debug", "PCM utterance streamed for: $text")
-                pending.setResultCode(Activity.RESULT_OK)
-                pending.finish()
-            }
-            if (!accepted) {
-                VoiceLog.w("Debug", "PCM utterance dropped for: $text")
-                pending.finish()
-            }
+            dispatchPcmUtterance(
+                context = context,
+                intent = intent,
+                pcm = pcm,
+                pending = pending,
+                successLog = "PCM utterance streamed for: $text",
+                failureLog = "PCM utterance dropped for: $text",
+            )
         }
     }
 
@@ -51,13 +50,36 @@ class VoiceDebugReceiver : BroadcastReceiver() {
         }
         val pcm = Base64.decode(encoded, Base64.DEFAULT)
         val pending = goAsync()
+        dispatchPcmUtterance(
+            context = context,
+            intent = intent,
+            pcm = pcm,
+            pending = pending,
+            successLog = "Raw PCM utterance streamed (${pcm.size} bytes)",
+            failureLog = "Raw PCM utterance dropped — voice session not connected",
+        )
+    }
+
+    private fun dispatchPcmUtterance(
+        context: Context,
+        intent: Intent,
+        pcm: ByteArray,
+        pending: BroadcastReceiver.PendingResult,
+        successLog: String,
+        failureLog: String,
+    ) {
+        if (intent.getBooleanExtra(EXTRA_MIRROR_PCM, false)) {
+            VoiceDebugBridge.pcmChunkMirror = TestPcmMirrorPlayback.create(context)
+            VoiceLog.i("Debug", "User PCM mirror playback enabled for E2E utterance")
+        }
         val accepted = VoiceDebugBridge.dispatchPcm(pcm) {
-            VoiceLog.i("Debug", "Raw PCM utterance streamed (${pcm.size} bytes)")
+            VoiceLog.i("Debug", successLog)
             pending.setResultCode(Activity.RESULT_OK)
             pending.finish()
         }
         if (!accepted) {
-            VoiceLog.w("Debug", "Raw PCM utterance dropped — voice session not connected")
+            VoiceDebugBridge.releasePcmChunkMirror()
+            VoiceLog.w("Debug", failureLog)
             pending.finish()
         }
     }
@@ -93,5 +115,6 @@ class VoiceDebugReceiver : BroadcastReceiver() {
         const val ACTION_VOICE_DISCONNECT = "com.example.roborazzidemo.VOICE_DISCONNECT"
         const val EXTRA_TEXT = "text"
         const val EXTRA_PCM = "pcm"
+        const val EXTRA_MIRROR_PCM = "mirror_pcm"
     }
 }

@@ -189,6 +189,7 @@ class GrokVoiceSession(
             try {
                 streamPcmUtterance(socket, pcmData)
             } finally {
+                VoiceDebugBridge.releasePcmChunkMirror()
                 onStreamComplete?.invoke()
             }
         }
@@ -213,9 +214,11 @@ class GrokVoiceSession(
                     put("audio", Base64.encodeToString(chunk, Base64.NO_WRAP))
                 }.toString(),
             )
+            VoiceDebugBridge.pcmChunkMirror?.writeChunk(chunk)
             offset = end
             delay(VoiceConstants.PCM_FRAME_DURATION_MS.toLong())
         }
+        VoiceDebugBridge.pcmChunkMirror?.awaitDrain()
         if (!VoiceDeviceHints.useHalfDuplexVoice()) {
             audioCapture.setMuted(false)
         }

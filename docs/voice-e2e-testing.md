@@ -77,7 +77,13 @@ Logging uses tag `VoiceE2E` via [`VoiceE2ELog.kt`](../app/src/androidTest/java/c
 
 E2E does not rely on host microphone input. [`TestSpeechAnnouncer.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/support/TestSpeechAnnouncer.kt) synthesizes each prompt at runtime via [`TestPcmSpeechGenerator`](../app/src/debug/java/com/example/roborazzidemo/voice/TestPcmSpeechGenerator.kt) (TTS → WAV → PCM16 @ 24 kHz) and streams it through `VOICE_PCM_SPEAK` → [`GrokVoiceSession.sendPcmUtterance`](../app/src/main/java/com/example/roborazzidemo/voice/GrokVoiceSession.kt) → `input_audio_buffer.append`.
 
-This exercises server VAD and ASR without emulator mic flakiness. Prompts are silent on the device speaker (PCM goes to the WebSocket, not `AudioTrack` playback).
+This exercises server VAD and ASR without emulator mic flakiness. By default prompts are silent on the device speaker (PCM goes to the WebSocket only).
+
+Optional audible user prompts (local only — mirrors the **same PCM bytes** to the speaker in sync with WebSocket streaming):
+
+```bash
+-Pandroid.testInstrumentationRunnerArguments.voiceE2eAudiblePrompts=true
+```
 
 Fast local smoke (2 user turns):
 

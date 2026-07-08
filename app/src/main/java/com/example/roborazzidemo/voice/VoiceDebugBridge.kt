@@ -14,6 +14,9 @@ object VoiceDebugBridge {
     @Volatile
     var disconnectCommand: (() -> Unit)? = null
 
+    @Volatile
+    var pcmChunkMirror: PcmChunkMirror? = null
+
     fun dispatch(text: String): Boolean {
         val handler = sendTextCommand ?: return false
         handler(text)
@@ -30,5 +33,10 @@ object VoiceDebugBridge {
         val handler = disconnectCommand ?: return false
         handler()
         return true
+    }
+
+    fun releasePcmChunkMirror() {
+        pcmChunkMirror?.release()
+        pcmChunkMirror = null
     }
 }
