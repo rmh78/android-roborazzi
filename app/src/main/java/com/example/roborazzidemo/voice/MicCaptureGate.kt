@@ -29,8 +29,8 @@ class MicCaptureGate {
     fun shouldRestoreToolsAfterDirectSpeech(hadAudio: Boolean): Boolean =
         state == State.HeldUntilSpokenDone && hadAudio
 
-    /** [VOICE_SPOKEN] inject: tools stay enabled; resume live mic after the turn completes. */
-    fun shouldResumeMicAfterSpokenInject(): Boolean = state == State.PausedForTextInject
+    /** [VOICE_TEXT] inject: resume live mic after the turn completes. */
+    fun shouldResumeMicAfterTextInject(): Boolean = state == State.PausedForTextInject
 
     fun onCaptureResumed() {
         state = State.Streaming

@@ -100,7 +100,7 @@ Expect turn-taking: wait for **Listening — ask a question** before speaking.
 - Extended Controls → Microphone → enable *Virtual microphone uses host audio input*
 - Use headphones to prevent speaker → mic feedback
 - Lower host mic gain in macOS Sound settings
-- For CI/scripted runs, use TTS + `VOICE_SPOKEN` injects (see [voice-e2e-testing.md](voice-e2e-testing.md))
+- For CI/scripted runs, use PCM inject via `VOICE_PCM_SPEAK` (see [voice-e2e-testing.md](voice-e2e-testing.md))
 
 ### Physical device: full-duplex
 
@@ -120,11 +120,11 @@ Registered in [`VoiceDebugReceiver.kt`](../app/src/debug/java/com/example/robora
 
 | Action | Extra | Purpose |
 |--------|-------|---------|
-| `com.example.roborazzidemo.VOICE_SPOKEN` | `text` | Inject spoken user turn (E2E primary path) |
+| `com.example.roborazzidemo.VOICE_PCM_SPEAK` | `text` | Synthesize and stream user utterance as PCM (E2E primary path) |
+| `com.example.roborazzidemo.VOICE_PCM_BYTES` | `pcm` | Stream raw PCM bytes (Base64) |
 | `com.example.roborazzidemo.VOICE_TEXT` | `text` | Inject text turn (direct-speech debug) |
 | `com.example.roborazzidemo.VOICE_DISCONNECT` | — | Disconnect session |
-| `com.example.roborazzidemo.VOICE_TEST_ANNOUNCE` | `text` | TTS playback (E2E speech simulation) |
-| `com.example.roborazzidemo.VOICE_TEST_SPEECH_BEGIN/END` | — | Mute mic during TTS playback |
+| `com.example.roborazzidemo.VOICE_TEST_WARMUP` | — | Warm up TTS engine for PCM synthesis |
 
 `VoiceDebugBridge` is populated by `VoiceAssistantViewModel` on connect and cleared on disconnect.
 

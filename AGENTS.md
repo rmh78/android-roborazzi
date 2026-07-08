@@ -65,7 +65,7 @@ VoiceAppIntegrationTest           # single live voice E2E test
 | `model/` | `Item` data (25 sample items) |
 | `src/test/` | Roborazzi screenshot tests + JVM unit tests |
 | `src/androidTest/voice/` | Voice E2E integration test + UiAutomator robot |
-| `src/debug/voice/` | Debug broadcasts (`VOICE_SPOKEN`, etc.) — debug builds only |
+| `src/debug/voice/` | Debug broadcasts (`VOICE_PCM_SPEAK`, etc.) — debug builds only |
 | `src/screenshots/` | Committed WebP golden images |
 
 ## Agent conventions

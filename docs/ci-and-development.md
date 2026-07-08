@@ -76,7 +76,8 @@ No secrets required.
 
 | Script | Purpose |
 |--------|---------|
-| [`scripts/run-voice-integration-test.sh`](../scripts/run-voice-integration-test.sh) | Runs `VoiceAppIntegrationTest` via `connectedDebugAndroidTest`; streams `VoiceE2E` logcat; fails if tests skipped |
+| [`scripts/run-voice-integration-test.sh`](../scripts/run-voice-integration-test.sh) | Runs full `com.example.roborazzidemo.voice` package (`EmulatorVoiceSetupTest` + `VoiceAppIntegrationTest`); streams `VoiceE2E` logcat |
+| [`scripts/run-voice-integration-test-short.sh`](../scripts/run-voice-integration-test-short.sh) | Fast smoke: `VoiceAppIntegrationTest` only with `voiceE2eShort=true` (~1 min) |
 | [`scripts/run-gradle-cache-warmup.sh`](../scripts/run-gradle-cache-warmup.sh) | Assembles debug + androidTest APKs without emulator (CI cache warmup) |
 | [`scripts/verify-buildconfig-api-key.sh`](../scripts/verify-buildconfig-api-key.sh) | Verifies debug APK has live API key (not `no-api-key`); never prints the secret |
 
@@ -89,7 +90,7 @@ app/src/
 ├── main/           # Production Compose UI, voice session, navigation
 ├── test/           # JVM: Roborazzi screenshot tests + unit tests
 ├── androidTest/    # Instrumented: VoiceAppIntegrationTest + robot
-├── debug/          # Debug-only: VoiceDebugReceiver, TestSpeechSpeaker
+├── debug/          # Debug-only: VoiceDebugReceiver, TestPcmSpeechGenerator
 └── screenshots/    # Committed WebP golden images (Roborazzi output)
 ```
 
@@ -98,7 +99,7 @@ app/src/
 | `main` | All | App runtime |
 | `test` | Unit test task | Roborazzi, JVM unit tests |
 | `androidTest` | Instrumented test task | Voice E2E |
-| `debug` | Debug builds only | Debug broadcasts, TTS test harness |
+| `debug` | Debug builds only | Debug broadcasts, PCM speech synthesis |
 | `screenshots` | N/A (committed assets) | Roborazzi golden comparison |
 
 ## Common commands

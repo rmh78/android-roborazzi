@@ -1,7 +1,9 @@
 package com.example.roborazzidemo.voice
 
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
 import android.util.Base64
 import java.util.LinkedList
@@ -10,7 +12,9 @@ import java.util.LinkedList
  * PCM16 playback aligned with xAI's
  * [PcmAudioSink](https://github.com/xai-org/xai-cookbook/tree/main/Android/VoiceApiAndroidExample).
  */
-class PcmAudioPlayback {
+class PcmAudioPlayback(
+    private val context: Context,
+) {
     private var audioTrack: AudioTrack? = null
     private val playbackQueue = LinkedList<ByteArray>()
     private val lock = Any()
@@ -188,6 +192,7 @@ class PcmAudioPlayback {
 
     private fun ensureTrackLocked() {
         if (audioTrack != null) return
+        boostPlaybackVolume()
         val minBuffer = AudioTrack.getMinBufferSize(
             VoiceConstants.SAMPLE_RATE_HZ,
             AudioFormat.CHANNEL_OUT_MONO,
@@ -217,6 +222,21 @@ class PcmAudioPlayback {
                     "AudioTrack created (${VoiceConstants.SAMPLE_RATE_HZ}Hz mono PCM16, media usage)",
                 )
             }
+    }
+
+    private fun boostPlaybackVolume() {
+        val audioManager =
+            context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val stream = AudioManager.STREAM_MUSIC
+        val maxVolume = audioManager.getStreamMaxVolume(stream)
+        val currentVolume = audioManager.getStreamVolume(stream)
+        if (currentVolume < maxVolume) {
+            audioManager.setStreamVolume(stream, maxVolume, 0)
+            VoiceLog.i(
+                "Playback",
+                "Boosted STREAM_MUSIC volume ($currentVolume → $maxVolume) for assistant audio",
+            )
+        }
     }
 
     private fun releaseTrackLocked() {

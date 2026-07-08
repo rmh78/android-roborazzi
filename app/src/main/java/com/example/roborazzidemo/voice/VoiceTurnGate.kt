@@ -13,13 +13,11 @@ internal object VoiceTurnGate {
         micGateState: MicCaptureGate.State,
         captureActive: Boolean,
         captureMuted: Boolean,
-        testUserSpeechPlayback: Boolean,
     ): Boolean =
         sessionConfigured &&
             activeResponseId == null &&
             !toolFollowupResponsePending &&
             playbackIdle &&
-            !testUserSpeechPlayback &&
             micGateState == MicCaptureGate.State.Streaming &&
             captureActive &&
             (!captureMuted || VoiceDeviceHints.useHalfDuplexVoice())

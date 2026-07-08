@@ -149,9 +149,7 @@ adb shell am force-stop com.example.roborazzidemo
   -Pandroid.testInstrumentationRunnerArguments.class=com.example.roborazzidemo.voice.VoiceAppIntegrationTest
 ```
 
-The test uses emulator TTS plus debug `VOICE_SPOKEN` injects to simulate user speech. Typical runtime is 2–5 minutes.
-
-Optional: disable TTS playback (inject only) with `-Pandroid.testInstrumentationRunnerArguments.disableTestSpeechPlayback=true`.
+User speech is simulated via runtime TTS→PCM synthesis streamed through `input_audio_buffer.append` (server VAD + ASR). Typical runtime is 2–5 minutes for the full flow, or ~1 minute with `bash scripts/run-voice-integration-test-short.sh`.
 
 **CI:** Pull requests run this test on a hardware-accelerated emulator. Add an `XAI_API_KEY` [repository secret](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions); without it the workflow fails fast. See [docs/voice-e2e-testing.md](docs/voice-e2e-testing.md) for the robot harness, semantics contract, and [docs/ci-and-development.md](docs/ci-and-development.md) for workflow details.
 
@@ -159,7 +157,8 @@ Optional: disable TTS playback (inject only) with `-Pandroid.testInstrumentation
 
 | Action | Purpose |
 |---|---|
-| `com.example.roborazzidemo.VOICE_SPOKEN` | Inject a spoken user turn (`text` extra) |
+| `com.example.roborazzidemo.VOICE_PCM_SPEAK` | Synthesize and stream a user utterance as PCM (`text` extra) |
+| `com.example.roborazzidemo.VOICE_PCM_BYTES` | Stream raw PCM bytes (`pcm` extra, Base64) |
 | `com.example.roborazzidemo.VOICE_TEXT` | Inject a text turn (direct-speech debug path) |
 | `com.example.roborazzidemo.VOICE_DISCONNECT` | Disconnect the voice session |
 

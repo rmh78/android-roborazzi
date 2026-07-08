@@ -11,8 +11,8 @@ import kotlinx.coroutines.launch
 import kotlin.math.sin
 
 /**
- * Drives [level] while user speech is injected (E2E TTS / VOICE_SPOKEN) so the SIG meter
- * animates even when live [PcmAudioCapture] is paused or the emulator mic is silent.
+ * Drives [level] while PCM utterances are streamed so the SIG meter animates even when
+ * live [PcmAudioCapture] is muted or the emulator mic is silent.
  */
 class SyntheticMicLevelAnimator(
     private val scope: CoroutineScope,
@@ -21,13 +21,6 @@ class SyntheticMicLevelAnimator(
     val level: StateFlow<Float> = _level.asStateFlow()
 
     private var animationJob: Job? = null
-
-    fun pulseForSpeech(
-        text: String,
-        durationMs: Long = estimateSpeechDuration(text),
-    ) {
-        pulseForDuration(durationMs)
-    }
 
     fun pulseForDuration(durationMs: Long) {
         animationJob?.cancel()

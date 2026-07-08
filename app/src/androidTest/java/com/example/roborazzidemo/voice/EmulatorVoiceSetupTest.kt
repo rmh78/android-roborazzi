@@ -1,7 +1,7 @@
 package com.example.roborazzidemo.voice
 
 import android.Manifest
-import androidx.test.ext.junit.rules.ActivityScenarioRule
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
@@ -12,8 +12,6 @@ import com.example.roborazzidemo.voice.support.TestSpeechAnnouncer
 import com.example.roborazzidemo.voice.support.VoiceAppTestRobot
 import com.example.roborazzidemo.voice.support.VoiceE2ELog
 import org.junit.Assume.assumeTrue
-import org.junit.After
-import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertTrue
@@ -28,28 +26,6 @@ class EmulatorVoiceSetupTest {
         Manifest.permission.RECORD_AUDIO,
         Manifest.permission.MODIFY_AUDIO_SETTINGS,
     )
-
-    @get:Rule(order = 1)
-    val activityRule = ActivityScenarioRule(MainActivity::class.java)
-
-    private lateinit var app: VoiceAppTestRobot
-
-    @Before
-    fun setUp() {
-        activityRule.scenario.onActivity { }
-        app = VoiceAppTestRobot.create(skipWarmUp = true)
-    }
-
-    @After
-    fun tearDown() {
-        if (::app.isInitialized) {
-            try {
-                app.disconnect()
-            } catch (_: Exception) {
-                // Best-effort cleanup between setup tests.
-            }
-        }
-    }
 
     @Test
     fun emulator_hints_detectAvd() {
@@ -93,16 +69,20 @@ class EmulatorVoiceSetupTest {
         check(BuildConfig.XAI_API_KEY != "no-api-key") {
             "Set XAI_API_KEY before building — PCM session test needs a live voice session"
         }
-        VoiceE2ELog.step("connect for PCM ping")
-        app.connect()
-        app.waitForVoiceReady(timeoutMillis = 120_000)
-        app.assertGreetingTurnIfPresent(timeoutMillis = 120_000)
-        VoiceE2ELog.step("stream PCM tone through live session")
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        TestSpeechAnnouncer.speakPcmBytes(context, TestPcmTone.sineTone())
-        VoiceE2ELog.detail("PCM tone streamed (${TestPcmTone.sineTone().size} bytes)")
-        app.disconnect()
-        app.waitUntilDisconnected()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { }
+            val app = VoiceAppTestRobot.create(skipWarmUp = true)
+            VoiceE2ELog.step("connect for PCM ping")
+            app.connect()
+            app.waitForVoiceReady(timeoutMillis = 120_000)
+            app.assertGreetingTurnIfPresent(timeoutMillis = 120_000)
+            VoiceE2ELog.step("stream PCM tone through live session")
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            TestSpeechAnnouncer.speakPcmBytes(context, TestPcmTone.sineTone())
+            VoiceE2ELog.detail("PCM tone streamed (${TestPcmTone.sineTone().size} bytes)")
+            app.disconnect()
+            app.waitUntilDisconnected()
+        }
     }
 
     @Test

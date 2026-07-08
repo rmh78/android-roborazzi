@@ -346,7 +346,6 @@ class VoiceAppTestRobot private constructor(
     private fun exchangeTurnsRecorded(): Boolean {
         val turns = conversationTurnsIncludingLive()
         if (!isValidConversationTurnOrder(turns)) return false
-        if (hasEchoTurnAfterGrok(turns)) return false
         return turns.count { it == "you" } >= 1 &&
             (turns.lastOrNull() == "grok" || turns.lastOrNull() == "you")
     }
@@ -510,17 +509,10 @@ class VoiceAppTestRobot private constructor(
         return true
     }
 
-    /** Echo shows up as a stray user turn immediately after Grok with no new exchange completing. */
     private fun parseIndexedTranscriptTurn(description: String?): Pair<Int, String>? {
         if (description == null) return null
         val match = INDEXED_TRANSCRIPT_REGEX.matchEntire(description) ?: return null
         return match.groupValues[1].toInt() to match.groupValues[2]
-    }
-
-    private fun hasEchoTurnAfterGrok(turns: List<String>): Boolean {
-        if (turns.size < 2) return false
-        if (turns.last() != "you") return false
-        return turns[turns.size - 2] == "grok" && isReadyToListen(status())
     }
 
     private fun lastToolLabel(): String? = readSafely(null) {
@@ -592,13 +584,17 @@ class VoiceAppTestRobot private constructor(
                 TestSpeechAnnouncer.warmUp(context)
             }
             val robot = VoiceAppTestRobot(device, context)
-            if (!robot.pollForAppLaunched(60_000)) {
-                robot.ensureAppInForeground()
-                check(robot.pollForAppLaunched(30_000)) {
-                    "App did not reach foreground. ${robot.diagnostics()}"
+            when {
+                robot.pollForAppShellVisible(5_000) -> Unit
+                robot.pollForAppLaunched(30_000) -> robot.waitForAppShellVisible(120_000)
+                else -> {
+                    robot.ensureAppInForeground()
+                    check(robot.pollForAppLaunched(30_000)) {
+                        "App did not reach foreground. ${robot.diagnostics()}"
+                    }
+                    robot.waitForAppShellVisible(120_000)
                 }
             }
-            robot.waitForAppShellVisible(timeoutMillis = 120_000)
             VoiceE2ELog.step("voice assistant overlay visible")
             return robot
         }

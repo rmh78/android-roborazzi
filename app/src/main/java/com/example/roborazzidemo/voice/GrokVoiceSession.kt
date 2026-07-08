@@ -47,7 +47,7 @@ class GrokVoiceSession(
 ) {
     private val audioCapture = PcmAudioCapture(applicationContext)
     private val syntheticMicLevel = SyntheticMicLevelAnimator(scope)
-    private val audioPlayback = PcmAudioPlayback()
+    private val audioPlayback = PcmAudioPlayback(applicationContext)
     private val audioRoute = VoiceAudioRoute(applicationContext)
     private val micGate = MicCaptureGate()
     private var webSocket: WebSocket? = null
@@ -65,7 +65,6 @@ class GrokVoiceSession(
     private var toolFollowupResponsePending = false
     private var toolFollowupResponseId: String? = null
     private var lastUserTranscriptItemId: String? = null
-    private var testUserSpeechPlayback = false
     private var pcmInjectJob: Job? = null
 
     val audioLevel: StateFlow<Float> = combine(
@@ -169,56 +168,6 @@ class GrokVoiceSession(
         }
     }
 
-    fun pulseMicLevelForSpeech(text: String) {
-        syntheticMicLevel.pulseForSpeech(text)
-    }
-
-    /** Mute live mic while emulator TTS plays so server VAD cannot commit speaker audio. */
-    fun beginTestUserSpeech() {
-        testUserSpeechPlayback = true
-        audioCapture.setMuted(true)
-        VoiceLog.d("Session", "Test user speech playback started — mic muted")
-        publishVoiceSync()
-    }
-
-    fun endTestUserSpeech() {
-        testUserSpeechPlayback = false
-        resumeMicAfterEmulatorHalfDuplex()
-        VoiceLog.d("Session", "Test user speech playback ended — mic gate re-evaluated")
-        publishVoiceSync()
-    }
-
-    fun sendSpokenUserMessage(text: String) {
-        if (!isUserTurnGateOpen()) {
-            VoiceLog.w("Session", "sendSpokenUserMessage blocked — user turn gate closed")
-            return
-        }
-        sendSpokenUserMessageNow(text)
-    }
-
-    private fun sendSpokenUserMessageNow(text: String) {
-        val socket = webSocket ?: run {
-            VoiceLog.w("Session", "sendSpokenUserMessage dropped — socket null")
-            return
-        }
-        if (!sessionConfigured) {
-            VoiceLog.w("Session", "sendSpokenUserMessage dropped — session not configured")
-            return
-        }
-        publishVoiceSync()
-        syntheticMicLevel.pulseForDuration(PROCESSING_MIC_PULSE_MS)
-        clearResponseWatchdog()
-        audioCapture.setMuted(true)
-        micGate.pauseForTextInject()
-        publishVoiceSync()
-        if (audioCapture.isCapturing()) {
-            VoiceLog.clientEvent("input_audio_buffer.clear (before spoken user inject)")
-            socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
-        }
-        listener.onUserTranscriptInjected(text)
-        sendUserTextTurn(socket, text, logLabel = "spoken user")
-    }
-
     fun sendPcmUtterance(pcmData: ByteArray, onStreamComplete: (() -> Unit)? = null) {
         if (!isUserTurnGateOpen()) {
             VoiceLog.w("Session", "sendPcmUtterance blocked — user turn gate closed")
@@ -289,7 +238,6 @@ class GrokVoiceSession(
             micGateState = micGate.state,
             captureActive = audioCapture.isCapturing(),
             captureMuted = audioCapture.isMuted(),
-            testUserSpeechPlayback = testUserSpeechPlayback,
         )
 
     private fun publishVoiceSync() {
@@ -683,7 +631,7 @@ class GrokVoiceSession(
                 awaitingToolsRestore = true
                 sendToolsSessionRestore(socket)
             }
-            micGate.shouldResumeMicAfterSpokenInject() || !audioCapture.isCapturing() -> {
+            micGate.shouldResumeMicAfterTextInject() || !audioCapture.isCapturing() -> {
                 micGate.onCaptureResumed()
                 startAudioCapture()
             }
@@ -763,7 +711,7 @@ class GrokVoiceSession(
             playbackFinalizeJob = null
             resumeMicAfterEmulatorHalfDuplex()
             when {
-                micGate.shouldResumeMicAfterSpokenInject() -> micGate.onCaptureResumed()
+                micGate.shouldResumeMicAfterTextInject() -> micGate.onCaptureResumed()
                 micGate.state != MicCaptureGate.State.Streaming -> micGate.onCaptureResumed()
             }
             if (!VoiceDeviceHints.useHalfDuplexVoice() && audioCapture.isMuted()) {
@@ -820,7 +768,7 @@ class GrokVoiceSession(
             }
             activeResponseId = null
             audioPlayback.stop()
-            if (micGate.shouldResumeMicAfterSpokenInject()) {
+            if (micGate.shouldResumeMicAfterTextInject()) {
                 micGate.onCaptureResumed()
             }
             resumeListeningAfterResponse(hadAudio = false)
@@ -848,7 +796,6 @@ class GrokVoiceSession(
         private const val PLAYBACK_FINALIZE_TIMEOUT_MS = 45_000L
         private const val EMULATOR_PLAYBACK_TAIL_MS = 500L
         private const val AUDIO_CHUNK_LOG_INTERVAL = 250
-        private const val PROCESSING_MIC_PULSE_MS = 1_500L
 
         /** Tools configured with type-only entries in session.update; executed by xAI, not the client. */
         private val SERVER_EXECUTED_TOOLS = setOf("web_search", "x_search", "file_search")

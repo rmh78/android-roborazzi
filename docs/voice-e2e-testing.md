@@ -22,9 +22,16 @@ Do **not** use E2E for pixel-level UI regression — that belongs in [screenshot
 | UiAutomator semantics | Needs rendered activity on device |
 | Turn-order validation | Needs real API responses |
 
-## Test entry point
+## Test entry points
 
-Single integration test: [`VoiceAppIntegrationTest.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/VoiceAppIntegrationTest.kt)
+Two instrumented test classes in `com.example.roborazzidemo.voice`:
+
+| Test | Purpose | API key | Typical runtime |
+|------|---------|---------|-----------------|
+| [`EmulatorVoiceSetupTest.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/EmulatorVoiceSetupTest.kt) | Emulator voice infra (capture, half-duplex, PCM ping) | Required for PCM ping only | ~30–60 s |
+| [`VoiceAppIntegrationTest.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/VoiceAppIntegrationTest.kt) | Live agent E2E (tools, navigation, turn order) | Required | 2–5 min (full) / ~1 min (short) |
+
+Primary integration test: [`VoiceAppIntegrationTest.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/VoiceAppIntegrationTest.kt)
 
 - Runs via `ActivityScenarioRule(MainActivity::class.java)`
 - Grants `RECORD_AUDIO` and `MODIFY_AUDIO_SETTINGS`
@@ -66,17 +73,22 @@ Single integration test: [`VoiceAppIntegrationTest.kt`](../app/src/androidTest/j
 
 Logging uses tag `VoiceE2E` via [`VoiceE2ELog.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/support/VoiceE2ELog.kt). CI streams this via logcat in [`scripts/run-voice-integration-test.sh`](../scripts/run-voice-integration-test.sh).
 
-## Speech simulation (TTS + inject)
+## Speech simulation (PCM inject)
 
-E2E does not rely on host microphone input. [`TestSpeechAnnouncer.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/support/TestSpeechAnnouncer.kt) uses:
+E2E does not rely on host microphone input. [`TestSpeechAnnouncer.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/support/TestSpeechAnnouncer.kt) synthesizes each prompt at runtime via [`TestPcmSpeechGenerator`](../app/src/debug/java/com/example/roborazzidemo/voice/TestPcmSpeechGenerator.kt) (TTS → WAV → PCM16 @ 24 kHz) and streams it through `VOICE_PCM_SPEAK` → [`GrokVoiceSession.sendPcmUtterance`](../app/src/main/java/com/example/roborazzidemo/voice/GrokVoiceSession.kt) → `input_audio_buffer.append`.
 
-1. Optional emulator TTS playback (audible on AVD)
-2. `VOICE_SPOKEN` debug broadcast to inject the user turn into the live session
+This exercises server VAD and ASR without emulator mic flakiness. Prompts are silent on the device speaker (PCM goes to the WebSocket, not `AudioTrack` playback).
 
-This avoids host-mic flakiness in CI. Disable TTS playback with:
+Fast local smoke (2 user turns):
 
 ```bash
--Pandroid.testInstrumentationRunnerArguments.disableTestSpeechPlayback=true
+bash scripts/run-voice-integration-test-short.sh
+```
+
+Optional host-mic sanity check (local only, skipped in CI):
+
+```bash
+-Pandroid.testInstrumentationRunnerArguments.requireHostMic=true
 ```
 
 ## Semantics contract
@@ -113,7 +125,6 @@ The robot validates conversation integrity:
 
 - Optional Grok greeting as first turn (if present)
 - Subsequent turns alternate You → Grok
-- `hasEchoTurnAfterGrok` detects echo loops (stale user turns after Grok on emulator)
 - Status line (`voice-status-*`) is authoritative over turn-indicator nodes
 
 ## Local run
@@ -122,6 +133,13 @@ The robot validates conversation integrity:
 export XAI_API_KEY=your-key-here
 adb shell am force-stop com.example.roborazzidemo
 
+./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.package=com.example.roborazzidemo.voice
+```
+
+Or run only the integration test:
+
+```bash
 ./gradlew :app:connectedDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=com.example.roborazzidemo.voice.VoiceAppIntegrationTest
 ```
@@ -136,7 +154,7 @@ The API key must be set **before building** — it is compiled into `BuildConfig
 - Requires `XAI_API_KEY` repository secret (fails fast if missing)
 - Runner: `ubuntu-latest` with KVM
 - Emulator: API 34, Pixel 6, x86_64
-- Flow: cache warmup → emulator boot → `scripts/run-voice-integration-test.sh`
+- Flow: cache warmup → emulator boot → `scripts/run-voice-integration-test.sh` (setup test + integration test)
 - On failure: uploads `voice-integration-test-results` artifact
 
 ## Checklist: extend E2E coverage

@@ -112,7 +112,7 @@ app/src/
 ├── main/           # Production code
 ├── test/           # JVM: Roborazzi + unit tests
 ├── androidTest/    # Instrumented: voice E2E
-├── debug/          # Debug-only: VoiceDebugReceiver, TestSpeechSpeaker
+├── debug/          # Debug-only: VoiceDebugReceiver, TestPcmSpeechGenerator
 └── screenshots/    # Committed WebP golden images
 ```
 
