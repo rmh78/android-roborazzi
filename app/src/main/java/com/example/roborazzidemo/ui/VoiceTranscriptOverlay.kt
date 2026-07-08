@@ -172,6 +172,17 @@ fun VoiceTranscriptOverlay(
                     },
                 )
 
+                state.emulatorMicHint?.let { hint ->
+                    Text(
+                        text = hint,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.semantics {
+                            contentDescription = "voice-emulator-mic-hint"
+                        },
+                    )
+                }
+
                 if (state.lastToolName.isNotBlank()) {
                     Text(
                         text = "MODULE // ${state.lastToolName}",

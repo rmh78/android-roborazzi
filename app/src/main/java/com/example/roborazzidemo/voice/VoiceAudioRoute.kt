@@ -4,8 +4,9 @@ import android.content.Context
 import android.media.AudioManager
 
 /**
- * Routes playback and capture through the voice-communication audio path,
- * matching the xAI Android Voice demo's [VOICE_COMMUNICATION] capture source.
+ * Routes playback and capture through [AudioManager.MODE_IN_COMMUNICATION] on physical
+ * devices. Skipped on emulators — IN_COMMUNICATION often silences the AVD virtual mic.
+ * The xAI Android demo does not change audio mode; it relies on [VOICE_COMMUNICATION] only.
  */
 class VoiceAudioRoute(context: Context) {
     private val audioManager =
@@ -16,6 +17,13 @@ class VoiceAudioRoute(context: Context) {
     fun enterVoiceChat() {
         if (active) {
             VoiceLog.i("AudioRoute", "Voice chat route already active")
+            return
+        }
+        if (VoiceDeviceHints.isLikelyEmulator()) {
+            VoiceLog.i(
+                "AudioRoute",
+                "Emulator detected — keeping default audio route (xAI demo pattern)",
+            )
             return
         }
         previousMode = audioManager.mode

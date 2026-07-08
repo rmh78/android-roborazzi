@@ -15,9 +15,20 @@ object VoiceDeviceHints {
             android.os.Build.HARDWARE.contains("ranchu", ignoreCase = true) ||
             android.os.Build.PRODUCT.contains("sdk_gphone", ignoreCase = true)
 
-    fun useVoiceCommunicationRoute(): Boolean = true
-
-    fun preferredCaptureSource(): Int = MediaRecorder.AudioSource.VOICE_COMMUNICATION
+    /**
+     * xAI demo uses [MediaRecorder.AudioSource.VOICE_COMMUNICATION] only.
+     * On emulators, fall back through additional sources when the virtual mic is silent.
+     */
+    fun captureSources(): List<Int> =
+        if (isLikelyEmulator()) {
+            listOf(
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.DEFAULT,
+            )
+        } else {
+            listOf(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+        }
 
     fun turnDetection(): JSONObject =
         JSONObject().apply {

@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.roborazzidemo.voice.GrokVoiceSession
+import com.example.roborazzidemo.voice.PcmAudioCapture
+import com.example.roborazzidemo.voice.VoiceDeviceHints
 import com.example.roborazzidemo.voice.VoiceCatalogClient
 import com.example.roborazzidemo.voice.VoiceConstants
 
@@ -50,6 +52,7 @@ data class VoiceUiState(
     val availableVoices: List<VoiceOption> = emptyList(),
     val voicesLoading: Boolean = false,
     val voicesLoadError: String? = null,
+    val emulatorMicHint: String? = null,
 ) {
     companion object {
         val RoborazziDisconnected = VoiceUiState(
@@ -134,7 +137,12 @@ class VoiceAssistantViewModel(
 
         viewModelScope.launch {
             voiceSession.audioLevel.collect { level ->
-                _uiState.update { it.copy(audioLevel = level) }
+                _uiState.update { state ->
+                    state.copy(
+                        audioLevel = level,
+                        emulatorMicHint = if (level > 0.02f) null else state.emulatorMicHint,
+                    )
+                }
             }
         }
     }
@@ -201,6 +209,7 @@ class VoiceAssistantViewModel(
                 audioLevel = 0f,
                 liveUserText = "",
                 liveAssistantText = "",
+                emulatorMicHint = null,
             )
         }
         sessionUserTurnAllowed = false
@@ -215,6 +224,7 @@ class VoiceAssistantViewModel(
                 isAssistantTurnActive = true,
                 turnPhase = VoiceTurnPhase.Assistant,
                 errorMessage = null,
+                emulatorMicHint = null,
             )
         }
     }
@@ -240,6 +250,13 @@ class VoiceAssistantViewModel(
                 ),
             )
         }
+    }
+
+    override fun onMicInputSilent() {
+        if (!VoiceDeviceHints.isLikelyEmulator()) return
+        val hint = PcmAudioCapture.emulatorMicFailureMessage("No microphone signal detected")
+        VoiceLog.w("UI", hint)
+        _uiState.update { it.copy(emulatorMicHint = hint) }
     }
 
     override fun onVoiceSyncChanged(assistantPlaybackActive: Boolean, userTurnAllowed: Boolean) {
@@ -453,6 +470,7 @@ class VoiceAssistantViewModel(
                 turnPhase = VoiceTurnPhase.Assistant,
                 audioLevel = 0f,
                 errorMessage = reason,
+                emulatorMicHint = null,
             )
         }
         sessionUserTurnAllowed = false

@@ -36,6 +36,8 @@ interface VoiceSessionListener {
     fun onDisconnected(reason: String? = null)
     /** Playback active or session gate closed — UI/tests must wait before the next user turn. */
     fun onVoiceSyncChanged(assistantPlaybackActive: Boolean, userTurnAllowed: Boolean)
+    /** Emulator virtual mic is capturing silence — show setup hint in overlay. */
+    fun onMicInputSilent() {}
 }
 
 class GrokVoiceSession(
@@ -80,6 +82,7 @@ class GrokVoiceSession(
 
     init {
         audioPlayback.onIdleChanged = { publishVoiceSync() }
+        audioCapture.setOnInputSilentListener { listener.onMicInputSilent() }
     }
 
     fun connect() {
@@ -421,6 +424,7 @@ class GrokVoiceSession(
                         listener.onSessionReady()
                         listener.onStatusChanged("Grok is greeting you…")
                         sendInitialGreeting(socket)
+                        startAudioCapture()
                     }
                     pendingText != null -> {
                         pendingDebugText = null
@@ -547,8 +551,13 @@ class GrokVoiceSession(
                 if (sessionConfigured) {
                     if (awaitingGreetingCompletion) {
                         awaitingGreetingCompletion = false
-                        listener.onStatusChanged("Preparing microphone…")
-                        startAudioCaptureAfterPlaybackIdle()
+                        if (audioCapture.isCapturing()) {
+                            listener.onStatusChanged("Listening — ask a question")
+                            publishVoiceSync()
+                        } else {
+                            listener.onStatusChanged("Preparing microphone…")
+                            startAudioCaptureAfterPlaybackIdle()
+                        }
                     } else if (
                         deferMicResumeForClientTool &&
                         toolFollowupResponsePending &&
