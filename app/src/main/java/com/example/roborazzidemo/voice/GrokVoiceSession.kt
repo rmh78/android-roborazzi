@@ -43,6 +43,7 @@ class GrokVoiceSession(
     private val scope: CoroutineScope,
     private val listener: VoiceSessionListener,
     applicationContext: Context,
+    private var voiceId: String = VoiceConstants.DEFAULT_VOICE_ID,
 ) {
     private val audioCapture = PcmAudioCapture(applicationContext)
     private val syntheticMicLevel = SyntheticMicLevelAnimator(scope)
@@ -254,7 +255,16 @@ class GrokVoiceSession(
         }
         pendingDebugText = text
         VoiceLog.clientEvent("session.update (direct-speech for debug inject)")
-        socket.send(VoiceSessionUpdateBuilder.directSpeechForDebugInject().toString())
+        socket.send(VoiceSessionUpdateBuilder.directSpeechForDebugInject(voiceId).toString())
+    }
+
+    fun updateVoice(newVoiceId: String) {
+        if (newVoiceId == voiceId) return
+        voiceId = newVoiceId
+        val socket = webSocket ?: return
+        if (!sessionConfigured) return
+        VoiceLog.clientEvent("session.update (voice=$voiceId)")
+        socket.send(VoiceSessionUpdateBuilder.withTools(voiceId).toString())
     }
 
     /**
@@ -310,13 +320,13 @@ class GrokVoiceSession(
     private fun sendSessionUpdate(socket: WebSocket) {
         if (sessionUpdateSent) return
         sessionUpdateSent = true
-        VoiceLog.clientEvent("session.update")
-        socket.send(VoiceSessionUpdateBuilder.withTools().toString())
+        VoiceLog.clientEvent("session.update (voice=$voiceId)")
+        socket.send(VoiceSessionUpdateBuilder.withTools(voiceId).toString())
     }
 
     private fun sendToolsSessionRestore(socket: WebSocket) {
-        VoiceLog.clientEvent("session.update (restore tools after debug inject)")
-        socket.send(VoiceSessionUpdateBuilder.withTools().toString())
+        VoiceLog.clientEvent("session.update (restore tools after debug inject, voice=$voiceId)")
+        socket.send(VoiceSessionUpdateBuilder.withTools(voiceId).toString())
     }
 
     private fun sendInitialGreeting(socket: WebSocket) {

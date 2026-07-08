@@ -5,8 +5,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.roborazzidemo.voice.GrokVoiceSession
+import com.example.roborazzidemo.voice.VoiceCatalogClient
+import com.example.roborazzidemo.voice.VoiceConstants
 import com.example.roborazzidemo.voice.VoiceDebugBridge
 import com.example.roborazzidemo.voice.VoiceLog
+import com.example.roborazzidemo.voice.VoiceOption
+import com.example.roborazzidemo.voice.VoicePreferences
 import com.example.roborazzidemo.voice.VoiceSessionListener
 import com.example.roborazzidemo.voice.VoiceToolExecutor
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +45,10 @@ data class VoiceUiState(
     val errorMessage: String? = null,
     val hasApiKey: Boolean = true,
     val hasMicrophonePermission: Boolean = false,
+    val selectedVoiceId: String = VoiceConstants.DEFAULT_VOICE_ID,
+    val availableVoices: List<VoiceOption> = emptyList(),
+    val voicesLoading: Boolean = false,
+    val voicesLoadError: String? = null,
 ) {
     companion object {
         val RoborazziDisconnected = VoiceUiState(
@@ -56,8 +64,16 @@ class VoiceAssistantViewModel(
     private val apiKey: String,
     private val toolExecutor: VoiceToolExecutor,
     private val applicationContext: Context,
+    private val voicePreferences: VoicePreferences = VoicePreferences(applicationContext),
+    private val voiceCatalogClient: VoiceCatalogClient = VoiceCatalogClient(apiKey),
 ) : ViewModel(), VoiceSessionListener {
-    private val _uiState = MutableStateFlow(VoiceUiState(hasApiKey = apiKey != "no-api-key"))
+    private val _uiState = MutableStateFlow(
+        VoiceUiState(
+            hasApiKey = apiKey != "no-api-key",
+            selectedVoiceId = voicePreferences.getSelectedVoiceId()
+                ?: VoiceConstants.DEFAULT_VOICE_ID,
+        ),
+    )
     val uiState: StateFlow<VoiceUiState> = _uiState.asStateFlow()
 
     private var session: GrokVoiceSession? = null
@@ -65,6 +81,12 @@ class VoiceAssistantViewModel(
     private var userSpeechActive: Boolean = false
     private var pendingUserTranscript: String? = null
     private var skipNextSpeechStoppedCommit: Boolean = false
+
+    init {
+        if (apiKey != "no-api-key") {
+            loadVoices()
+        }
+    }
 
     fun setMicrophonePermissionGranted(granted: Boolean) {
         VoiceLog.ui("Microphone permission: $granted")
@@ -90,6 +112,7 @@ class VoiceAssistantViewModel(
             scope = viewModelScope,
             listener = this,
             applicationContext = applicationContext,
+            voiceId = _uiState.value.selectedVoiceId,
         )
         session = voiceSession
         VoiceDebugBridge.sendTextCommand = { text ->
@@ -113,6 +136,52 @@ class VoiceAssistantViewModel(
                 _uiState.update { it.copy(audioLevel = level) }
             }
         }
+    }
+
+    fun selectVoice(voiceId: String) {
+        if (voiceId == _uiState.value.selectedVoiceId) return
+        VoiceLog.ui("Voice selected: $voiceId")
+        voicePreferences.setSelectedVoiceId(voiceId)
+        _uiState.update { it.copy(selectedVoiceId = voiceId) }
+        session?.updateVoice(voiceId)
+    }
+
+    fun reloadVoices() {
+        if (apiKey == "no-api-key") return
+        loadVoices()
+    }
+
+    private fun loadVoices() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(voicesLoading = true, voicesLoadError = null) }
+            try {
+                val voices = voiceCatalogClient.fetchVoices()
+                val selected = resolveSelectedVoiceId(voices, _uiState.value.selectedVoiceId)
+                if (selected != _uiState.value.selectedVoiceId) {
+                    voicePreferences.setSelectedVoiceId(selected)
+                }
+                _uiState.update {
+                    it.copy(
+                        availableVoices = voices,
+                        selectedVoiceId = selected,
+                        voicesLoading = false,
+                    )
+                }
+            } catch (error: Exception) {
+                VoiceLog.e("UI", "Failed to load voice catalog", error)
+                _uiState.update {
+                    it.copy(
+                        voicesLoading = false,
+                        voicesLoadError = error.message ?: "Failed to load voices",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun resolveSelectedVoiceId(voices: List<VoiceOption>, preferredId: String): String {
+        if (voices.any { it.id == preferredId }) return preferredId
+        return voices.firstOrNull()?.id ?: preferredId
     }
 
     fun disconnect() {

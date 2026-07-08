@@ -22,23 +22,30 @@ object VoiceSessionUpdateBuilder {
 
     val initialGreetingInstructions: String = "Say exactly: Hello"
 
-    fun withTools(): JSONObject = sessionUpdateJson(
+    fun withTools(voiceId: String = VoiceConstants.DEFAULT_VOICE_ID): JSONObject = sessionUpdateJson(
+        voiceId = voiceId,
         instructions = toolsSessionInstructions,
         tools = VoiceToolDefinitions.toolsJson(),
     )
 
-    fun directSpeechForDebugInject(): JSONObject = sessionUpdateJson(
-        instructions = directSpeechInstructions,
-        tools = JSONArray(),
-    )
+    fun directSpeechForDebugInject(voiceId: String = VoiceConstants.DEFAULT_VOICE_ID): JSONObject =
+        sessionUpdateJson(
+            voiceId = voiceId,
+            instructions = directSpeechInstructions,
+            tools = JSONArray(),
+        )
 
-    private fun sessionUpdateJson(instructions: String, tools: JSONArray): JSONObject =
+    private fun sessionUpdateJson(
+        voiceId: String,
+        instructions: String,
+        tools: JSONArray,
+    ): JSONObject =
         JSONObject().apply {
             put("type", "session.update")
             put(
                 "session",
                 JSONObject().apply {
-                    put("voice", VoiceConstants.VOICE_ID)
+                    put("voice", voiceId)
                     put("instructions", instructions)
                     put("reasoning", JSONObject().put("effort", "none"))
                     put("turn_detection", VoiceDeviceHints.turnDetection())

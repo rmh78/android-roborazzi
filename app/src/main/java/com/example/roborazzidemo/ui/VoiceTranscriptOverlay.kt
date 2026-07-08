@@ -50,6 +50,7 @@ import com.example.roborazzidemo.viewmodel.VoiceUiState
 fun VoiceTranscriptOverlay(
     state: VoiceUiState,
     onConnectChange: (Boolean) -> Unit,
+    onVoiceSelected: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -118,6 +119,17 @@ fun VoiceTranscriptOverlay(
                             .semantics { contentDescription = "voice-connect-switch" },
                     )
                 }
+            }
+
+            if (state.hasApiKey) {
+                VoicePicker(
+                    selectedVoiceId = state.selectedVoiceId,
+                    availableVoices = state.availableVoices,
+                    voicesLoading = state.voicesLoading,
+                    voicesLoadError = state.voicesLoadError,
+                    enabled = !state.voicesLoading || state.availableVoices.isNotEmpty(),
+                    onVoiceSelected = onVoiceSelected,
+                )
             }
 
             Text(
