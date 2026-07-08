@@ -180,7 +180,9 @@ class GrokVoiceSession(
 
     fun endTestUserSpeech() {
         testUserSpeechPlayback = false
-        resumeMicAfterEmulatorHalfDuplex()
+        if (audioCapture.isMuted()) {
+            audioCapture.setMuted(false)
+        }
         VoiceLog.d("Session", "Test user speech playback ended — mic gate re-evaluated")
         publishVoiceSync()
     }
@@ -441,9 +443,7 @@ class GrokVoiceSession(
                 }
                 clearResponseWatchdog()
                 lastUserTranscriptItemId = null
-                if (!VoiceDeviceHints.useHalfDuplexVoice()) {
-                    audioPlayback.flush()
-                }
+                audioPlayback.flush()
                 listener.onUserSpeechStarted()
                 listener.onStatusChanged("You are speaking")
             }
@@ -484,7 +484,6 @@ class GrokVoiceSession(
                 clearResponseWatchdog()
                 activeResponseId = json.optJSONObject("response")?.optString("id")
                 activeResponseHadAudio = false
-                muteMicForEmulatorHalfDuplex()
                 if (toolFollowupResponsePending) {
                     toolFollowupResponseId = activeResponseId
                     VoiceLog.i(
@@ -501,7 +500,6 @@ class GrokVoiceSession(
             -> {
                 clearResponseWatchdog()
                 activeResponseHadAudio = true
-                muteMicForEmulatorHalfDuplex()
                 audioPlayback.playBase64Chunk(json.optString("delta", ""))
                 publishVoiceSync()
             }
@@ -590,32 +588,8 @@ class GrokVoiceSession(
         }
     }
 
-    /**
-     * Emulator half-duplex: stop streaming mic audio while Grok speaks (no AEC on AVD).
-     * Never sends [input_audio_buffer.clear] — server VAD owns committed audio.
-     */
-    private fun muteMicForEmulatorHalfDuplex() {
-        if (!VoiceDeviceHints.useHalfDuplexVoice() || !audioCapture.isCapturing() || audioCapture.isMuted()) {
-            return
-        }
-        audioCapture.setMuted(true)
-        VoiceLog.d("Session", "Emulator half-duplex: mic muted during assistant speech")
-        publishVoiceSync()
-    }
-
     private fun shouldIgnoreSpeechVad(): Boolean =
-        micGate.state != MicCaptureGate.State.Streaming ||
-            (VoiceDeviceHints.useHalfDuplexVoice() && activeResponseId != null) ||
-            (VoiceDeviceHints.useHalfDuplexVoice() && !audioPlayback.isIdle())
-
-    private fun resumeMicAfterEmulatorHalfDuplex() {
-        if (!VoiceDeviceHints.useHalfDuplexVoice() || !audioCapture.isMuted()) {
-            return
-        }
-        audioCapture.setMuted(false)
-        VoiceLog.d("Session", "Emulator half-duplex: mic resumed for user turn")
-        publishVoiceSync()
-    }
+        micGate.state != MicCaptureGate.State.Streaming
 
     private fun resumeMicAfterInject(socket: WebSocket, hadAudio: Boolean) {
         when {
@@ -632,14 +606,8 @@ class GrokVoiceSession(
     }
 
     private fun startAudioCaptureAfterPlaybackIdle() {
-        audioPlayback.whenIdle(
-            onIdle = { startAudioCapture() },
-            postDrainDelayMs = emulatorPlaybackTailMs(),
-        )
+        audioPlayback.whenIdle(onIdle = { startAudioCapture() })
     }
-
-    private fun emulatorPlaybackTailMs(): Long =
-        if (VoiceDeviceHints.isLikelyEmulator()) EMULATOR_PLAYBACK_TAIL_MS else 0L
 
     private fun startAudioCapture() {
         scope.launch(Dispatchers.IO) {
@@ -693,12 +661,11 @@ class GrokVoiceSession(
             finalized = true
             playbackFinalizeJob?.cancel()
             playbackFinalizeJob = null
-            resumeMicAfterEmulatorHalfDuplex()
             when {
                 micGate.shouldResumeMicAfterSpokenInject() -> micGate.onCaptureResumed()
                 micGate.state != MicCaptureGate.State.Streaming -> micGate.onCaptureResumed()
             }
-            if (!VoiceDeviceHints.useHalfDuplexVoice() && audioCapture.isMuted()) {
+            if (micGate.state == MicCaptureGate.State.Streaming && audioCapture.isMuted()) {
                 audioCapture.setMuted(false)
             }
             publishVoiceSync()
@@ -707,10 +674,7 @@ class GrokVoiceSession(
             )
         }
         if (hadAudio || !audioPlayback.isIdle()) {
-            audioPlayback.whenIdle(
-                onIdle = { finalizeResponse() },
-                postDrainDelayMs = emulatorPlaybackTailMs(),
-            )
+            audioPlayback.whenIdle(onIdle = { finalizeResponse() })
             playbackFinalizeJob = scope.launch {
                 delay(PLAYBACK_FINALIZE_TIMEOUT_MS)
                 if (!finalized) {
@@ -778,7 +742,6 @@ class GrokVoiceSession(
         private const val RESPONSE_CREATE_TIMEOUT_MS = 20_000L
         private const val TOOL_FOLLOWUP_TIMEOUT_MS = 60_000L
         private const val PLAYBACK_FINALIZE_TIMEOUT_MS = 45_000L
-        private const val EMULATOR_PLAYBACK_TAIL_MS = 500L
         private const val AUDIO_CHUNK_LOG_INTERVAL = 250
         private const val PROCESSING_MIC_PULSE_MS = 1_500L
 

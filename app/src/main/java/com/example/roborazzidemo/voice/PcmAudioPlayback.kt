@@ -141,12 +141,7 @@ class PcmAudioPlayback {
         }
     }
 
-    private fun playbackDrainSlackFrames(): Long =
-        if (VoiceDeviceHints.isLikelyEmulator()) {
-            EMULATOR_PLAYBACK_HEAD_SLACK_FRAMES
-        } else {
-            PLAYBACK_HEAD_SLACK_FRAMES
-        }
+    private fun playbackDrainSlackFrames(): Long = PLAYBACK_HEAD_SLACK_FRAMES
 
     private fun playNextChunk() {
         while (true) {
@@ -243,6 +238,5 @@ class PcmAudioPlayback {
         private const val PLAYBACK_HEAD_POLL_MS = 20L
         private const val PLAYBACK_DRAIN_MARGIN_MS = 1_500L
         private const val PLAYBACK_HEAD_SLACK_FRAMES = 2_400L
-        private const val EMULATOR_PLAYBACK_HEAD_SLACK_FRAMES = 7_200L
     }
 }
