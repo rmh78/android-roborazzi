@@ -2,6 +2,8 @@
 set -euo pipefail
 
 TEST_PACKAGE="com.example.roborazzidemo.voice"
+TEST_CLASS="${VOICE_E2E_CLASS:-}"
+VOICE_E2E_SHORT="${VOICE_E2E_SHORT:-false}"
 LOGCAT_PID=""
 
 log() {
@@ -29,15 +31,28 @@ GRADLE_ARGS=(
   :app:connectedDebugAndroidTest
   --console=plain
   --stacktrace
-  "-Pandroid.testInstrumentationRunnerArguments.package=${TEST_PACKAGE}"
 )
+
+if [[ -n "${TEST_CLASS}" ]]; then
+  GRADLE_ARGS+=("-Pandroid.testInstrumentationRunnerArguments.class=${TEST_CLASS}")
+else
+  GRADLE_ARGS+=("-Pandroid.testInstrumentationRunnerArguments.package=${TEST_PACKAGE}")
+fi
+
+if [[ "${VOICE_E2E_SHORT}" == "true" ]]; then
+  GRADLE_ARGS+=("-Pandroid.testInstrumentationRunnerArguments.voiceE2eShort=true")
+fi
 
 if [[ -z "${XAI_API_KEY:-}" ]]; then
   echo "::error::XAI_API_KEY must be set for voice integration test"
   exit 1
 fi
 
-log "Running voice integration test"
+if [[ "${VOICE_E2E_SHORT}" != "true" ]]; then
+  log "Running voice integration test (full)"
+else
+  log "Running voice integration test (short)"
+fi
 bash scripts/verify-buildconfig-api-key.sh
 start_logcat
 ./gradlew "${GRADLE_ARGS[@]}"

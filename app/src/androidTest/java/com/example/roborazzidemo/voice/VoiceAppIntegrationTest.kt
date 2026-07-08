@@ -8,6 +8,7 @@ import com.example.roborazzidemo.BuildConfig
 import com.example.roborazzidemo.MainActivity
 import com.example.roborazzidemo.voice.support.VoiceAppTestRobot
 import com.example.roborazzidemo.voice.support.VoiceE2ELog
+import com.example.roborazzidemo.voice.support.VoiceE2eConfig
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -34,10 +35,21 @@ class VoiceAppIntegrationTest {
 
     @Test
     fun app_connects_exercisesAllVoiceToolsAndNavScreens_thenDisconnects() {
+        requireLiveApiKey()
+        if (VoiceE2eConfig.isShortMode()) {
+            runShortVoicePath()
+        } else {
+            runFullVoicePath()
+        }
+    }
+
+    private fun requireLiveApiKey() {
         check(BuildConfig.XAI_API_KEY != "no-api-key") {
             "Set XAI_API_KEY before building — placeholder key means the live API test did not run"
         }
+    }
 
+    private fun connectAndGreet() {
         VoiceE2ELog.step("assert app and home screen visible")
         app.assertAppVisible()
         app.assertHomeScreenVisible()
@@ -47,6 +59,39 @@ class VoiceAppIntegrationTest {
         app.waitForVoiceReady(timeoutMillis = 120_000)
         app.assertConnectedVoiceChromeVisible()
         app.assertGreetingTurnIfPresent()
+    }
+
+    private fun disconnect() {
+        VoiceE2ELog.step("disconnect")
+        app.disconnect()
+        app.waitUntilDisconnected()
+    }
+
+    /** ~1 min: connect, describe_screen, navigate_to_screen, disconnect. */
+    private fun runShortVoicePath() {
+        VoiceE2ELog.step("mode: short voice E2E")
+        connectAndGreet()
+
+        VoiceE2ELog.step("home — describe_screen")
+        app.speakAndWaitForTool("describe the screen for me", "describe_screen")
+        app.assertLastToolWas("describe_screen")
+        app.assertExchangeTurns()
+
+        VoiceE2ELog.step("navigate to items list")
+        app.speakAndWaitForTool("navigate me to the list page", "navigate_to_screen")
+        app.waitForItemsListScreen()
+        app.assertExchangeTurns()
+
+        VoiceE2ELog.step("assert conversation turn counts and order")
+        app.assertConversationTurnCounts(minYou = 2, minGrok = 2)
+        app.assertValidConversationTurns()
+
+        disconnect()
+    }
+
+    private fun runFullVoicePath() {
+        VoiceE2ELog.step("mode: full voice E2E")
+        connectAndGreet()
 
         VoiceE2ELog.step("home — describe_screen")
         app.speakAndWaitForTool("describe the screen for me", "describe_screen")
@@ -105,8 +150,6 @@ class VoiceAppIntegrationTest {
         app.assertConversationTurnCounts(minYou = 11, minGrok = 10)
         app.assertValidConversationTurns()
 
-        VoiceE2ELog.step("disconnect")
-        app.disconnect()
-        app.waitUntilDisconnected()
+        disconnect()
     }
 }
