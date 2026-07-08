@@ -78,6 +78,14 @@ No secrets required.
 |--------|---------|
 | [`scripts/run-voice-integration-test.sh`](../scripts/run-voice-integration-test.sh) | Runs full `com.example.roborazzidemo.voice` package (`EmulatorVoiceSetupTest` + `VoiceAppIntegrationTest`); streams `VoiceE2E` logcat |
 | [`scripts/run-voice-integration-test-short.sh`](../scripts/run-voice-integration-test-short.sh) | Fast smoke: `VoiceAppIntegrationTest` only with `voiceE2eShort=true` (~1 min) |
+
+Optional instrumentation args (append to any `connectedDebugAndroidTest` invocation; see [voice-e2e-testing.md](voice-e2e-testing.md)):
+
+| Argument | CI | Purpose |
+|----------|-----|---------|
+| `voiceE2eShort=true` | No | 2-turn integration smoke |
+| `voiceE2eAudiblePrompts=true` | No | Mirror user PCM to emulator speaker (same bytes as xAI) |
+| `requireHostMic=true` | No | Run host virtual-mic RMS probe |
 | [`scripts/run-gradle-cache-warmup.sh`](../scripts/run-gradle-cache-warmup.sh) | Assembles debug + androidTest APKs without emulator (CI cache warmup) |
 | [`scripts/verify-buildconfig-api-key.sh`](../scripts/verify-buildconfig-api-key.sh) | Verifies debug APK has live API key (not `no-api-key`); never prints the secret |
 
@@ -89,8 +97,8 @@ All voice scripts require `XAI_API_KEY` in the environment.
 app/src/
 ├── main/           # Production Compose UI, voice session, navigation
 ├── test/           # JVM: Roborazzi screenshot tests + unit tests
-├── androidTest/    # Instrumented: VoiceAppIntegrationTest + robot
-├── debug/          # Debug-only: VoiceDebugReceiver, TestPcmSpeechGenerator
+├── androidTest/    # Instrumented: EmulatorVoiceSetupTest, VoiceAppIntegrationTest, robot
+├── debug/          # Debug-only: VoiceDebugReceiver, TestPcmSpeechGenerator, TestPcmMirrorPlayback
 └── screenshots/    # Committed WebP golden images (Roborazzi output)
 ```
 
@@ -99,7 +107,7 @@ app/src/
 | `main` | All | App runtime |
 | `test` | Unit test task | Roborazzi, JVM unit tests |
 | `androidTest` | Instrumented test task | Voice E2E |
-| `debug` | Debug builds only | Debug broadcasts, PCM speech synthesis |
+| `debug` | Debug builds only | Debug broadcasts, PCM synthesis, optional speaker mirror for E2E |
 | `screenshots` | N/A (committed assets) | Roborazzi golden comparison |
 
 ## Common commands
@@ -117,12 +125,17 @@ export XAI_API_KEY=your-key-here   # optional for UI-only work
   -Proborazzi.test.verify=false \
   -Proborazzi.test.record=true
 
-# Voice E2E
-./gradlew :app:connectedDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=com.example.roborazzidemo.voice.VoiceAppIntegrationTest
-
-# CI-local voice script (with emulator running)
+# Voice E2E full package (with emulator running)
 bash scripts/run-voice-integration-test.sh
+
+# Voice E2E short smoke
+bash scripts/run-voice-integration-test-short.sh
+
+# Voice E2E short + audible user prompts (local demo)
+./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.example.roborazzidemo.voice.VoiceAppIntegrationTest \
+  -Pandroid.testInstrumentationRunnerArguments.voiceE2eShort=true \
+  -Pandroid.testInstrumentationRunnerArguments.voiceE2eAudiblePrompts=true
 ```
 
 ## Checklist: add a new navigation route
@@ -142,7 +155,7 @@ bash scripts/run-voice-integration-test.sh
 | Roborazzi runner/command | `.github/workflows/roborazzi.yml` |
 | PR diff comment behavior | `.github/workflows/roborazzi-comment.yml` |
 | Emulator profile/API level | `.github/workflows/voice-integration-test.yml` `with:` block |
-| Voice test class or args | `scripts/run-voice-integration-test.sh` |
+| Voice test class or args | `scripts/run-voice-integration-test.sh`, `VoiceE2eConfig` runner args |
 | Cache warmup targets | `scripts/run-gradle-cache-warmup.sh` |
 | API key validation | `scripts/verify-buildconfig-api-key.sh`, `app/build.gradle.kts` |
 

@@ -102,8 +102,9 @@ The navigation graph and screens are shared. The test harnesses differ:
 | Navigation | Compose Test clicks (`onNodeWithText`) | Voice commands → tool execution |
 | Assertions | Pixel comparison + `assertIsDisplayed` | UiAutomator semantics + turn order |
 | Network | None | Live xAI WebSocket |
+| User speech | N/A | PCM inject via `TestSpeechAnnouncer` (optional speaker mirror with `voiceE2eAudiblePrompts`) |
 
-Roborazzi tests render individual screens or `AppNavHost` in isolation with mocked callbacks. E2E drives the full running app through voice injects and validates agent behavior end-to-end.
+Roborazzi tests render individual screens or `AppNavHost` in isolation with mocked callbacks. E2E drives the full running app through PCM utterance injects and validates agent behavior end-to-end.
 
 ## Source set layout
 
@@ -111,8 +112,8 @@ Roborazzi tests render individual screens or `AppNavHost` in isolation with mock
 app/src/
 ├── main/           # Production code
 ├── test/           # JVM: Roborazzi + unit tests
-├── androidTest/    # Instrumented: voice E2E
-├── debug/          # Debug-only: VoiceDebugReceiver, TestPcmSpeechGenerator
+├── androidTest/    # Instrumented: EmulatorVoiceSetupTest, VoiceAppIntegrationTest
+├── debug/          # Debug-only: VoiceDebugReceiver, TestPcmSpeechGenerator, TestPcmMirrorPlayback
 └── screenshots/    # Committed WebP golden images
 ```
 

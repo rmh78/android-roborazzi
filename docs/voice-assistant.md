@@ -47,7 +47,10 @@ sequenceDiagram
 | [`VoiceNavigationHandler.kt`](../app/src/main/java/com/example/roborazzidemo/navigation/VoiceNavigationHandler.kt) | `navigate_to_screen`, `navigate_back` |
 | [`VoiceAssistantViewModel.kt`](../app/src/main/java/com/example/roborazzidemo/viewmodel/VoiceAssistantViewModel.kt) | `VoiceSessionListener`, `VoiceUiState`, debug bridge wiring |
 | [`PcmAudioCapture.kt`](../app/src/main/java/com/example/roborazzidemo/voice/PcmAudioCapture.kt) | Mic streaming with AEC on hardware |
-| [`PcmAudioPlayback.kt`](../app/src/main/java/com/example/roborazzidemo/voice/PcmAudioPlayback.kt) | Speaker output, barge-in flush |
+| [`PcmAudioPlayback.kt`](../app/src/main/java/com/example/roborazzidemo/voice/PcmAudioPlayback.kt) | Grok assistant speaker output, barge-in flush, `STREAM_MUSIC` boost on emulator |
+| [`PcmChunkMirror.kt`](../app/src/main/java/com/example/roborazzidemo/voice/PcmChunkMirror.kt) | Debug hook: mirror E2E user PCM frames to speaker |
+| [`TestPcmMirrorPlayback.kt`](../app/src/debug/java/com/example/roborazzidemo/voice/TestPcmMirrorPlayback.kt) | Debug `AudioTrack` implementation of `PcmChunkMirror` |
+| [`TestPcmSpeechGenerator.kt`](../app/src/debug/java/com/example/roborazzidemo/voice/TestPcmSpeechGenerator.kt) | E2E TTS → WAV → PCM24k synthesis |
 | [`VoiceAudioRoute.kt`](../app/src/main/java/com/example/roborazzidemo/voice/VoiceAudioRoute.kt) | `MODE_IN_COMMUNICATION` routing |
 | [`VoiceDeviceHints.kt`](../app/src/main/java/com/example/roborazzidemo/voice/VoiceDeviceHints.kt) | Emulator vs device strategy selection |
 
@@ -120,13 +123,19 @@ Registered in [`VoiceDebugReceiver.kt`](../app/src/debug/java/com/example/robora
 
 | Action | Extra | Purpose |
 |--------|-------|---------|
-| `com.example.roborazzidemo.VOICE_PCM_SPEAK` | `text` | Synthesize and stream user utterance as PCM (E2E primary path) |
-| `com.example.roborazzidemo.VOICE_PCM_BYTES` | `pcm` | Stream raw PCM bytes (Base64) |
+| `com.example.roborazzidemo.VOICE_PCM_SPEAK` | `text`, optional `mirror_pcm` | Synthesize and stream user utterance as PCM (E2E primary path) |
+| `com.example.roborazzidemo.VOICE_PCM_BYTES` | `pcm`, optional `mirror_pcm` | Stream raw PCM bytes (Base64) |
 | `com.example.roborazzidemo.VOICE_TEXT` | `text` | Inject text turn (direct-speech debug) |
 | `com.example.roborazzidemo.VOICE_DISCONNECT` | — | Disconnect session |
 | `com.example.roborazzidemo.VOICE_TEST_WARMUP` | — | Warm up TTS engine for PCM synthesis |
 
 `VoiceDebugBridge` is populated by `VoiceAssistantViewModel` on connect and cleared on disconnect.
+
+### E2E audible user prompts (debug, local only)
+
+When `mirror_pcm=true` is set on a PCM broadcast (driven by instrumentation arg `voiceE2eAudiblePrompts=true` in [`VoiceE2eConfig`](../app/src/androidTest/java/com/example/roborazzidemo/voice/support/VoiceE2eConfig.kt)), [`GrokVoiceSession`](../app/src/main/java/com/example/roborazzidemo/voice/GrokVoiceSession.kt) streams each `input_audio_buffer.append` frame to xAI **and** mirrors the identical frame to a local `AudioTrack` via [`TestPcmMirrorPlayback`](../app/src/debug/java/com/example/roborazzidemo/voice/TestPcmMirrorPlayback.kt). Grok replies remain on [`PcmAudioPlayback`](../app/src/main/java/com/example/roborazzidemo/voice/PcmAudioPlayback.kt). CI does not enable this path.
+
+See [voice-e2e-testing.md](voice-e2e-testing.md) for runner arguments and examples.
 
 ## Setup
 

@@ -12,7 +12,7 @@ Technical reference for AI agents and contributors working in this repository.
 | Strategy | Source set | Runner | What it validates |
 |----------|------------|--------|-------------------|
 | **Roborazzi (JVM)** | `app/src/test/` | Robolectric on JVM | Compose UI pixels, themes, scroll positions, navigation flows |
-| **Instrumented E2E** | `app/src/androidTest/` | Emulator + live API | Voice session, tool execution, turn order, navigation via voice |
+| **Instrumented E2E** | `app/src/androidTest/` | Emulator + live API | Emulator setup + live agent E2E (PCM inject; optional audible mirror locally) |
 
 Use Roborazzi for visual regression. Use instrumented E2E for live agent behavior. Do not move voice-session tests into `src/test` or screenshot tests into `src/androidTest`.
 
@@ -64,8 +64,8 @@ VoiceAppIntegrationTest           # single live voice E2E test
 | `viewmodel/` | `VoiceAssistantViewModel`, `ItemListScrollController`, `VoiceUiState` |
 | `model/` | `Item` data (25 sample items) |
 | `src/test/` | Roborazzi screenshot tests + JVM unit tests |
-| `src/androidTest/voice/` | Voice E2E integration test + UiAutomator robot |
-| `src/debug/voice/` | Debug broadcasts (`VOICE_PCM_SPEAK`, etc.) — debug builds only |
+| `src/androidTest/voice/` | `EmulatorVoiceSetupTest`, `VoiceAppIntegrationTest`, UiAutomator robot |
+| `src/debug/voice/` | `VoiceDebugReceiver`, `TestPcmSpeechGenerator`, `TestPcmMirrorPlayback` |
 | `src/screenshots/` | Committed WebP golden images |
 
 ## Agent conventions
@@ -96,17 +96,24 @@ VoiceAppIntegrationTest           # single live voice E2E test
 # Open Roborazzi HTML report
 open app/build/reports/roborazzi/debug/index.html
 
-# Voice E2E (requires XAI_API_KEY, emulator/device, network)
+# Voice E2E full package (requires XAI_API_KEY, emulator/device, network)
 export XAI_API_KEY=your-key-here
-adb shell am force-stop com.example.roborazzidemo
+bash scripts/run-voice-integration-test.sh
+
+# Voice E2E short smoke (~1 min)
+bash scripts/run-voice-integration-test-short.sh
+
+# Hear user prompts + Grok on emulator speaker (local only)
 ./gradlew :app:connectedDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=com.example.roborazzidemo.voice.VoiceAppIntegrationTest
+  -Pandroid.testInstrumentationRunnerArguments.class=com.example.roborazzidemo.voice.VoiceAppIntegrationTest \
+  -Pandroid.testInstrumentationRunnerArguments.voiceE2eShort=true \
+  -Pandroid.testInstrumentationRunnerArguments.voiceE2eAudiblePrompts=true
 ```
 
 ## Pitfalls
 
 - **Do not mix test layers** — Roborazzi tests belong in `src/test`; live voice tests belong in `src/androidTest`.
-- **Emulator half-duplex** — on AVDs the mic is muted while Grok speaks; no barge-in. Wait for `Listening — ask a question` before injecting speech in E2E.
+- **Emulator half-duplex** — on AVDs the mic is muted while Grok speaks; no barge-in. Wait for `Listening — ask a question` before injecting speech in E2E. User prompts are PCM-injected (silent by default); use `voiceE2eAudiblePrompts=true` locally to mirror the same PCM to the speaker.
 - **Physical device full-duplex** — hardware AEC enables always-on mic and barge-in; behavior differs from emulator.
 - **Intentional UI changes** — update goldens with record mode and commit `app/src/screenshots/*.webp` alongside code.
 - **New voice tools** — update `VoiceToolDefinitions`, `VoiceToolExecutor`, session instructions, and E2E assertions; add Roborazzi coverage only if UI changes.

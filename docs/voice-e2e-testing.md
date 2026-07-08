@@ -33,7 +33,7 @@ Two instrumented test classes in `com.example.roborazzidemo.voice`:
 
 Primary integration test: [`VoiceAppIntegrationTest.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/VoiceAppIntegrationTest.kt)
 
-- Runs via `ActivityScenarioRule(MainActivity::class.java)`
+- Launches `MainActivity` once via `ActivityScenarioRule` (integration test only; setup tests avoid relaunching the app per method)
 - Grants `RECORD_AUDIO` and `MODIFY_AUDIO_SETTINGS`
 - Fails fast if `BuildConfig.XAI_API_KEY == "no-api-key"`
 - Typical runtime: 2–5 minutes
@@ -75,27 +75,75 @@ Logging uses tag `VoiceE2E` via [`VoiceE2ELog.kt`](../app/src/androidTest/java/c
 
 ## Speech simulation (PCM inject)
 
-E2E does not rely on host microphone input. [`TestSpeechAnnouncer.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/support/TestSpeechAnnouncer.kt) synthesizes each prompt at runtime via [`TestPcmSpeechGenerator`](../app/src/debug/java/com/example/roborazzidemo/voice/TestPcmSpeechGenerator.kt) (TTS → WAV → PCM16 @ 24 kHz) and streams it through `VOICE_PCM_SPEAK` → [`GrokVoiceSession.sendPcmUtterance`](../app/src/main/java/com/example/roborazzidemo/voice/GrokVoiceSession.kt) → `input_audio_buffer.append`.
+E2E does **not** drive user speech through the host microphone. [`TestSpeechAnnouncer.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/support/TestSpeechAnnouncer.kt) synthesizes each prompt at runtime via [`TestPcmSpeechGenerator`](../app/src/debug/java/com/example/roborazzidemo/voice/TestPcmSpeechGenerator.kt) (TTS → WAV → PCM16 @ 24 kHz) and streams it through `VOICE_PCM_SPEAK` → [`GrokVoiceSession.sendPcmUtterance`](../app/src/main/java/com/example/roborazzidemo/voice/GrokVoiceSession.kt) → `input_audio_buffer.append`.
 
-This exercises server VAD and ASR without emulator mic flakiness. By default prompts are silent on the device speaker (PCM goes to the WebSocket only).
+This exercises server VAD and ASR without emulator mic flakiness.
 
-Optional audible user prompts (local only — mirrors the **same PCM bytes** to the speaker in sync with WebSocket streaming):
+```mermaid
+sequenceDiagram
+    participant Robot as VoiceAppTestRobot
+    participant Announcer as TestSpeechAnnouncer
+    participant Gen as TestPcmSpeechGenerator
+    participant Debug as VoiceDebugReceiver
+    participant Session as GrokVoiceSession
+    participant Mirror as TestPcmMirrorPlayback
+    participant API as xAI Voice API
 
-```bash
--Pandroid.testInstrumentationRunnerArguments.voiceE2eAudiblePrompts=true
+    Robot->>Announcer: speak(text)
+    Announcer->>Debug: VOICE_PCM_SPEAK ordered broadcast
+    Debug->>Gen: synthesizeToFile → PCM24k
+    opt voiceE2eAudiblePrompts=true
+        Debug->>Mirror: enable PcmChunkMirror
+    end
+    Debug->>Session: dispatchPcm(pcm)
+    loop each 20ms frame
+        Session->>API: input_audio_buffer.append
+        Session->>Mirror: writeChunk(same frame)
+    end
+    API-->>Session: VAD + ASR + tool routing
 ```
 
-Fast local smoke (2 user turns):
+### Default audio behavior
+
+| Audio | Default (CI + local) | With `voiceE2eAudiblePrompts=true` |
+|-------|----------------------|-------------------------------------|
+| User prompts | Silent on device speaker (WebSocket only) | Same PCM bytes mirrored to speaker in sync with each WebSocket frame |
+| Grok replies | Audible via [`PcmAudioPlayback`](../app/src/main/java/com/example/roborazzidemo/voice/PcmAudioPlayback.kt) (`STREAM_MUSIC` boosted on emulator) | Same |
+
+Audible user prompts use [`TestPcmMirrorPlayback`](../app/src/debug/java/com/example/roborazzidemo/voice/TestPcmMirrorPlayback.kt) and [`PcmChunkMirror`](../app/src/main/java/com/example/roborazzidemo/voice/PcmChunkMirror.kt). The live mic stays muted on emulator during inject (no echo / phantom VAD). **CI never sets this flag.**
+
+### Instrumentation runner arguments
+
+Read by [`VoiceE2eConfig.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/support/VoiceE2eConfig.kt):
+
+| Argument | Default | Purpose |
+|----------|---------|---------|
+| `voiceE2eShort` | `false` | Minimal integration path: 2 user turns (~1 min) |
+| `voiceE2eAudiblePrompts` | `false` | Mirror user PCM to device speaker (local debugging / demos) |
+| `requireHostMic` | `false` | Run `virtual_mic_signal_detected` (host virtual mic RMS probe) |
+
+Examples:
 
 ```bash
+# Full package (setup + integration), silent user prompts — CI default
+bash scripts/run-voice-integration-test.sh
+
+# Fast smoke, silent user prompts
 bash scripts/run-voice-integration-test-short.sh
+
+# Fast smoke, hear both user prompts and Grok (local)
+./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.example.roborazzidemo.voice.VoiceAppIntegrationTest \
+  -Pandroid.testInstrumentationRunnerArguments.voiceE2eShort=true \
+  -Pandroid.testInstrumentationRunnerArguments.voiceE2eAudiblePrompts=true
+
+# Host-mic infra probe (local; skipped unless flag set)
+./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.package=com.example.roborazzidemo.voice \
+  -Pandroid.testInstrumentationRunnerArguments.requireHostMic=true
 ```
 
-Optional host-mic sanity check (local only, skipped in CI):
-
-```bash
--Pandroid.testInstrumentationRunnerArguments.requireHostMic=true
-```
+Logcat when mirror is active: `TestPcmMirror` / `User PCM mirror playback enabled for E2E utterance`.
 
 ## Semantics contract
 
@@ -173,3 +221,4 @@ The API key must be set **before building** — it is compiled into `BuildConfig
 6. Update minimum turn counts in `assertConversationTurnCounts` if adding turns.
 7. Run locally on emulator with live API key before pushing.
 8. Verify CI secret is configured for PR runs.
+9. Optional local demo: add `voiceE2eAudiblePrompts=true` to hear user PCM on the speaker (not for CI).

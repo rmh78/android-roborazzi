@@ -88,7 +88,8 @@ app/
 └── src/androidTest/                # Instrumented voice E2E (emulator + live API)
     └── voice/
         ├── VoiceAppIntegrationTest.kt
-        └── support/                # UiAutomator robot + TTS test harness
+        ├── EmulatorVoiceSetupTest.kt
+        └── support/                # UiAutomator robot + PCM speech driver
 ```
 
 See [docs/architecture.md](docs/architecture.md) for composition root, navigation graph, and how both test harnesses share the same UI.
@@ -140,25 +141,41 @@ See [docs/voice-assistant.md](docs/voice-assistant.md) for the echo-loop diagram
 
 ### Voice integration test (emulator)
 
-A single instrumented E2E test connects to the live API, exercises every nav screen and voice tool, validates conversation turn order (You → Grok), and disconnects. Requires `XAI_API_KEY`, a running emulator/device, and network.
+Two instrumented test classes in `com.example.roborazzidemo.voice`:
+
+| Test | Role |
+|------|------|
+| `EmulatorVoiceSetupTest` | Fast emulator voice infra checks (capture, half-duplex, PCM ping) |
+| `VoiceAppIntegrationTest` | Live agent E2E — every nav screen, all voice tools, turn order |
+
+Requires `XAI_API_KEY`, a running emulator/device, and network.
 
 ```bash
 adb shell am force-stop com.example.roborazzidemo
 
-./gradlew :app:connectedDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=com.example.roborazzidemo.voice.VoiceAppIntegrationTest
+# Full package (~3 min) — CI default
+bash scripts/run-voice-integration-test.sh
+
+# Fast smoke (~1 min)
+bash scripts/run-voice-integration-test-short.sh
 ```
 
-User speech is simulated via runtime TTS→PCM synthesis streamed through `input_audio_buffer.append` (server VAD + ASR). Typical runtime is 2–5 minutes for the full flow, or ~1 minute with `bash scripts/run-voice-integration-test-short.sh`.
+User speech is simulated via runtime TTS→PCM synthesis streamed through `input_audio_buffer.append` (server VAD + ASR). **Grok replies are audible** on the emulator speaker. User prompts are **silent by default**; opt in locally to hear the **same PCM bytes** mirrored to the speaker:
 
-**CI:** Pull requests run this test on a hardware-accelerated emulator. Add an `XAI_API_KEY` [repository secret](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions); without it the workflow fails fast. See [docs/voice-e2e-testing.md](docs/voice-e2e-testing.md) for the robot harness, semantics contract, and [docs/ci-and-development.md](docs/ci-and-development.md) for workflow details.
+```bash
+-Pandroid.testInstrumentationRunnerArguments.voiceE2eAudiblePrompts=true
+```
+
+Combine with short smoke for a ~1 min audible demo run. See [docs/voice-e2e-testing.md](docs/voice-e2e-testing.md) for all runner arguments (`voiceE2eShort`, `requireHostMic`, etc.).
+
+**CI:** Pull requests run the full voice package on a hardware-accelerated emulator (silent user prompts). Add an `XAI_API_KEY` [repository secret](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions); without it the workflow fails fast. See [docs/ci-and-development.md](docs/ci-and-development.md) for workflow details.
 
 ### Debug broadcasts (debug builds)
 
 | Action | Purpose |
 |---|---|
-| `com.example.roborazzidemo.VOICE_PCM_SPEAK` | Synthesize and stream a user utterance as PCM (`text` extra) |
-| `com.example.roborazzidemo.VOICE_PCM_BYTES` | Stream raw PCM bytes (`pcm` extra, Base64) |
+| `com.example.roborazzidemo.VOICE_PCM_SPEAK` | Synthesize and stream a user utterance as PCM (`text` extra; optional `mirror_pcm` for speaker playback) |
+| `com.example.roborazzidemo.VOICE_PCM_BYTES` | Stream raw PCM bytes (`pcm` extra, Base64; optional `mirror_pcm`) |
 | `com.example.roborazzidemo.VOICE_TEXT` | Inject a text turn (direct-speech debug path) |
 | `com.example.roborazzidemo.VOICE_DISCONNECT` | Disconnect the voice session |
 
