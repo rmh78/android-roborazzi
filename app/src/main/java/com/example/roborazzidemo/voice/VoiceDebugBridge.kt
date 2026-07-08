@@ -12,6 +12,9 @@ object VoiceDebugBridge {
     var sendSpokenUserCommand: ((String) -> Unit)? = null
 
     @Volatile
+    var sendPcmUtterance: ((ByteArray) -> Unit)? = null
+
+    @Volatile
     var disconnectCommand: (() -> Unit)? = null
 
     @Volatile
@@ -32,6 +35,12 @@ object VoiceDebugBridge {
     fun dispatchSpoken(text: String): Boolean {
         val handler = sendSpokenUserCommand ?: return false
         handler(text)
+        return true
+    }
+
+    fun dispatchPcm(pcm: ByteArray): Boolean {
+        val handler = sendPcmUtterance ?: return false
+        handler(pcm)
         return true
     }
 

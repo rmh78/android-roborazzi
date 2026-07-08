@@ -1,6 +1,7 @@
 package com.example.roborazzidemo.voice
 
 import android.content.Context
+import android.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -65,6 +66,7 @@ class GrokVoiceSession(
     private var toolFollowupResponseId: String? = null
     private var lastUserTranscriptItemId: String? = null
     private var testUserSpeechPlayback = false
+    private var pcmInjectJob: Job? = null
 
     val audioLevel: StateFlow<Float> = combine(
         audioCapture.audioLevel,
@@ -143,6 +145,8 @@ class GrokVoiceSession(
         responseWatchdogJob = null
         playbackFinalizeJob?.cancel()
         playbackFinalizeJob = null
+        pcmInjectJob?.cancel()
+        pcmInjectJob = null
         audioCapture.stop()
         syntheticMicLevel.cancel()
         audioPlayback.stop()
@@ -213,6 +217,58 @@ class GrokVoiceSession(
         }
         listener.onUserTranscriptInjected(text)
         sendUserTextTurn(socket, text, logLabel = "spoken user")
+    }
+
+    fun sendPcmUtterance(pcmData: ByteArray) {
+        if (!isUserTurnGateOpen()) {
+            VoiceLog.w("Session", "sendPcmUtterance blocked — user turn gate closed")
+            return
+        }
+        val socket = webSocket ?: run {
+            VoiceLog.w("Session", "sendPcmUtterance dropped — socket null")
+            return
+        }
+        if (!sessionConfigured) {
+            VoiceLog.w("Session", "sendPcmUtterance dropped — session not configured")
+            return
+        }
+        pcmInjectJob?.cancel()
+        pcmInjectJob = scope.launch(Dispatchers.IO) {
+            streamPcmUtterance(socket, pcmData)
+        }
+    }
+
+    private suspend fun streamPcmUtterance(socket: WebSocket, pcmData: ByteArray) {
+        clearResponseWatchdog()
+        audioCapture.setMuted(true)
+        syntheticMicLevel.pulseForDuration(pcmDurationMs(pcmData))
+        VoiceLog.clientEvent("input_audio_buffer.append (PCM utterance, bytes=${pcmData.size})")
+        val frameSize = VoiceConstants.PCM_FRAME_BYTES
+        var offset = 0
+        while (offset < pcmData.size) {
+            val end = minOf(offset + frameSize, pcmData.size)
+            var chunk = pcmData.copyOfRange(offset, end)
+            if (chunk.size < frameSize) {
+                chunk = chunk + ByteArray(frameSize - chunk.size)
+            }
+            socket.send(
+                JSONObject().apply {
+                    put("type", "input_audio_buffer.append")
+                    put("audio", Base64.encodeToString(chunk, Base64.NO_WRAP))
+                }.toString(),
+            )
+            offset = end
+            delay(VoiceConstants.PCM_FRAME_DURATION_MS.toLong())
+        }
+        audioCapture.setMuted(false)
+        publishVoiceSync()
+        VoiceLog.i("Session", "PCM utterance streamed (${pcmData.size} bytes) — awaiting server VAD")
+    }
+
+    private fun pcmDurationMs(pcmData: ByteArray): Long {
+        val samples = pcmData.size / 2
+        return (samples * 1_000L / VoiceConstants.SAMPLE_RATE_HZ)
+            .coerceAtLeast(VoiceConstants.PCM_FRAME_DURATION_MS.toLong())
     }
 
     private fun isUserTurnGateOpen(): Boolean =

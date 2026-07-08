@@ -9,6 +9,8 @@
                 <action android:name="com.example.roborazzidemo.VOICE_TEST_WARMUP" />
                 <action android:name="com.example.roborazzidemo.VOICE_TEST_ANNOUNCE" />
                 <action android:name="com.example.roborazzidemo.VOICE_TEXT" />
+                <action android:name="com.example.roborazzidemo.VOICE_PCM_SPEAK" />
+                <action android:name="com.example.roborazzidemo.VOICE_PCM_BYTES" />
                 <action android:name="com.example.roborazzidemo.VOICE_SPOKEN" />
                 <action android:name="com.example.roborazzidemo.VOICE_TEST_SPEECH_BEGIN" />
                 <action android:name="com.example.roborazzidemo.VOICE_TEST_SPEECH_END" />

@@ -109,6 +109,13 @@ class VoiceAppTestRobot private constructor(
         waitForListeningPhase(timeoutMillis)
     }
 
+    fun waitForUserSpeakingStatus(timeoutMillis: Long = 30_000) {
+        waitUntil(timeoutMillis, "Timed out waiting for user-speaking status. ${diagnostics()}") {
+            isUserSpeaking(status()) ||
+                device.findObject(By.desc("voice-turn-phase-user")) != null
+        }
+    }
+
     private data class ToolWaitBaseline(
         val youTurns: Int,
         val grokTurns: Int,
@@ -161,7 +168,8 @@ class VoiceAppTestRobot private constructor(
             "Timed out waiting for spoken prompt to register. ${diagnostics()}",
         ) {
             conversationTurnsIncludingLive().count { it == "you" } > baseline.youTurns ||
-                device.findObject(By.desc("voice-transcript-live-you")) != null
+                device.findObject(By.desc("voice-transcript-live-you")) != null ||
+                isUserSpeaking(status())
         }
     }
 
@@ -558,12 +566,14 @@ class VoiceAppTestRobot private constructor(
             "Error",
         )
 
-        fun create(): VoiceAppTestRobot {
+        fun create(skipWarmUp: Boolean = false): VoiceAppTestRobot {
             val instrumentation = InstrumentationRegistry.getInstrumentation()
             val device = UiDevice.getInstance(instrumentation)
             device.waitForIdle(5_000)
             val context = instrumentation.targetContext
-            TestSpeechAnnouncer.warmUp(context)
+            if (!skipWarmUp) {
+                TestSpeechAnnouncer.warmUp(context)
+            }
             val robot = VoiceAppTestRobot(device, context)
             if (!robot.pollForAppLaunched(60_000)) {
                 robot.ensureAppInForeground()

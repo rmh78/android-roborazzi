@@ -4,23 +4,19 @@ import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import androidx.test.platform.app.InstrumentationRegistry
 import com.example.roborazzidemo.voice.VoiceDebugReceiver
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * Plays audible user TTS, then injects the turn via [VoiceDebugReceiver.ACTION_VOICE_SPOKEN].
+ * Streams synthesized user speech as PCM via [VoiceDebugReceiver.ACTION_VOICE_PCM_SPEAK].
  * The robot waits for [voice-turn-phase-listening] before calling [speak].
- *
- * Order: mute mic → TTS (user hears the prompt) → inject (transcript + server turn).
  */
 object TestSpeechAnnouncer {
     private const val WARMUP_MS = 2_000L
-    private const val TTS_TIMEOUT_MS = 45_000L
+    private const val PCM_TIMEOUT_MS = 60_000L
 
     fun warmUp(context: Context) {
-        if (!speechEnabled()) return
         context.sendBroadcast(
             Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_WARMUP).setPackage(context.packageName),
         )
@@ -28,35 +24,10 @@ object TestSpeechAnnouncer {
     }
 
     fun speak(context: Context, text: String) {
-        if (speechEnabled()) {
-            context.sendBroadcast(
-                Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_SPEECH_BEGIN)
-                    .setPackage(context.packageName),
-            )
-            try {
-                playTts(context, text)
-            } finally {
-                context.sendBroadcast(
-                    Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_SPEECH_END)
-                        .setPackage(context.packageName),
-                )
-            }
-        }
-        context.sendBroadcast(
-            Intent(VoiceDebugReceiver.ACTION_VOICE_SPOKEN)
-                .setPackage(context.packageName)
-                .putExtra(VoiceDebugReceiver.EXTRA_TEXT, text),
-        )
-    }
-
-    private fun speechEnabled(): Boolean =
-        InstrumentationRegistry.getArguments().getString("disableTestSpeechPlayback") != "true"
-
-    private fun playTts(context: Context, text: String) {
         val latch = CountDownLatch(1)
         var ok = false
         context.sendOrderedBroadcast(
-            Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_ANNOUNCE)
+            Intent(VoiceDebugReceiver.ACTION_VOICE_PCM_SPEAK)
                 .setPackage(context.packageName)
                 .putExtra(VoiceDebugReceiver.EXTRA_TEXT, text),
             null,
@@ -71,9 +42,20 @@ object TestSpeechAnnouncer {
             null,
             null,
         )
-        check(latch.await(TTS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-            "Timed out waiting for emulator TTS: \"$text\""
+        check(latch.await(PCM_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+            "Timed out waiting for PCM speech synthesis: \"$text\""
         }
-        check(ok) { "Emulator TTS failed for: \"$text\"" }
+        check(ok) { "PCM speech synthesis failed for: \"$text\"" }
+    }
+
+    fun speakPcmBytes(context: Context, pcm: ByteArray) {
+        context.sendBroadcast(
+            Intent(VoiceDebugReceiver.ACTION_VOICE_PCM_BYTES)
+                .setPackage(context.packageName)
+                .putExtra(
+                    VoiceDebugReceiver.EXTRA_PCM,
+                    android.util.Base64.encodeToString(pcm, android.util.Base64.NO_WRAP),
+                ),
+        )
     }
 }

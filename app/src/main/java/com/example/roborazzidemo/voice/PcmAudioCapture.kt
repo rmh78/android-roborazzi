@@ -53,7 +53,11 @@ class PcmAudioCapture(
 
     fun isMuted(): Boolean = isMuted
 
-    fun start(onChunk: (String) -> Unit, onFailure: (String) -> Unit = {}) {
+    fun start(
+        onChunk: (String) -> Unit,
+        onFailure: (String) -> Unit = {},
+        allowSilentEmulatorInput: Boolean = false,
+    ) {
         if (isCapturing) {
             setMuted(false)
             return
@@ -77,7 +81,7 @@ class PcmAudioCapture(
                         continue
                     }
 
-                    if (VoiceDeviceHints.isLikelyEmulator()) {
+                    if (VoiceDeviceHints.isLikelyEmulator() && !allowSilentEmulatorInput) {
                         val probe = probeSignal(PROBE_FRAMES)
                         if (probe.maxRms < SILENT_SOURCE_MAX_RMS) {
                             VoiceLog.w(
@@ -226,6 +230,12 @@ class PcmAudioCapture(
     }
 
     fun isCapturing(): Boolean = isCapturing
+
+    /** Non-silent probe while capture is active — for emulator mic health checks. */
+    fun probeActiveSignal(frames: Int = PROBE_FRAMES): Float {
+        if (!isCapturing) return 0f
+        return probeSignal(frames).maxRms
+    }
 
     fun stop() {
         isCapturing = false

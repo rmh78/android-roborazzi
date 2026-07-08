@@ -100,6 +100,10 @@ class VoiceAssistantViewModel(
             VoiceLog.i("Debug", "Forwarding spoken user message to session: $text")
             voiceSession.sendSpokenUserMessage(text)
         }
+        VoiceDebugBridge.sendPcmUtterance = { pcm ->
+            VoiceLog.i("Debug", "Forwarding PCM utterance to session (${pcm.size} bytes)")
+            voiceSession.sendPcmUtterance(pcm)
+        }
         VoiceDebugBridge.disconnectCommand = { disconnect() }
         VoiceDebugBridge.pulseMicLevelForSpeech = { text ->
             voiceSession.pulseMicLevelForSpeech(text)
@@ -397,6 +401,7 @@ class VoiceAssistantViewModel(
     private fun clearDebugBridge() {
         VoiceDebugBridge.sendTextCommand = null
         VoiceDebugBridge.sendSpokenUserCommand = null
+        VoiceDebugBridge.sendPcmUtterance = null
         VoiceDebugBridge.disconnectCommand = null
         VoiceDebugBridge.pulseMicLevelForSpeech = null
         VoiceDebugBridge.beginTestUserSpeech = null

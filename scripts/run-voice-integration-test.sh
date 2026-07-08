@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TEST_CLASS="com.example.roborazzidemo.voice.VoiceAppIntegrationTest"
+TEST_PACKAGE="com.example.roborazzidemo.voice"
 LOGCAT_PID=""
 
 log() {
@@ -29,7 +29,7 @@ GRADLE_ARGS=(
   :app:connectedDebugAndroidTest
   --console=plain
   --stacktrace
-  "-Pandroid.testInstrumentationRunnerArguments.class=${TEST_CLASS}"
+  "-Pandroid.testInstrumentationRunnerArguments.package=${TEST_PACKAGE}"
 )
 
 if [[ -z "${XAI_API_KEY:-}" ]]; then
