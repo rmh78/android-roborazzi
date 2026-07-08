@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
  */
 object TestSpeechAnnouncer {
     private const val WARMUP_MS = 2_000L
-    private const val PCM_TIMEOUT_MS = 60_000L
+    private const val PCM_TIMEOUT_MS = 90_000L
 
     fun warmUp(context: Context) {
         context.sendBroadcast(
@@ -24,15 +24,36 @@ object TestSpeechAnnouncer {
     }
 
     fun speak(context: Context, text: String) {
+        dispatchOrderedPcm(
+            context = context,
+            intent = Intent(VoiceDebugReceiver.ACTION_VOICE_PCM_SPEAK)
+                .setPackage(context.packageName)
+                .putExtra(VoiceDebugReceiver.EXTRA_TEXT, text),
+            failureLabel = "PCM speech for \"$text\"",
+        )
+    }
+
+    fun speakPcmBytes(context: Context, pcm: ByteArray) {
+        dispatchOrderedPcm(
+            context = context,
+            intent = Intent(VoiceDebugReceiver.ACTION_VOICE_PCM_BYTES)
+                .setPackage(context.packageName)
+                .putExtra(
+                    VoiceDebugReceiver.EXTRA_PCM,
+                    android.util.Base64.encodeToString(pcm, android.util.Base64.NO_WRAP),
+                ),
+            failureLabel = "PCM bytes (${pcm.size} bytes)",
+        )
+    }
+
+    private fun dispatchOrderedPcm(context: Context, intent: Intent, failureLabel: String) {
         val latch = CountDownLatch(1)
         var ok = false
         context.sendOrderedBroadcast(
-            Intent(VoiceDebugReceiver.ACTION_VOICE_PCM_SPEAK)
-                .setPackage(context.packageName)
-                .putExtra(VoiceDebugReceiver.EXTRA_TEXT, text),
+            intent,
             null,
             object : BroadcastReceiver() {
-                override fun onReceive(ctx: Context?, intent: Intent?) {
+                override fun onReceive(ctx: Context?, received: Intent?) {
                     ok = resultCode == Activity.RESULT_OK
                     latch.countDown()
                 }
@@ -43,19 +64,8 @@ object TestSpeechAnnouncer {
             null,
         )
         check(latch.await(PCM_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-            "Timed out waiting for PCM speech synthesis: \"$text\""
+            "Timed out waiting for $failureLabel"
         }
-        check(ok) { "PCM speech synthesis failed for: \"$text\"" }
-    }
-
-    fun speakPcmBytes(context: Context, pcm: ByteArray) {
-        context.sendBroadcast(
-            Intent(VoiceDebugReceiver.ACTION_VOICE_PCM_BYTES)
-                .setPackage(context.packageName)
-                .putExtra(
-                    VoiceDebugReceiver.EXTRA_PCM,
-                    android.util.Base64.encodeToString(pcm, android.util.Base64.NO_WRAP),
-                ),
-        )
+        check(ok) { "Failed streaming $failureLabel" }
     }
 }

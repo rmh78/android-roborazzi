@@ -12,7 +12,7 @@ class VoiceDebugReceiver : BroadcastReceiver() {
             ACTION_VOICE_TEST_WARMUP -> TestPcmSpeechGenerator.warmUp(context)
             ACTION_VOICE_TEST_ANNOUNCE -> handleTestAnnounce(context, intent)
             ACTION_VOICE_PCM_SPEAK -> handleVoicePcmSpeak(context, intent)
-            ACTION_VOICE_PCM_BYTES -> handleVoicePcmBytes(intent)
+            ACTION_VOICE_PCM_BYTES -> handleVoicePcmBytes(context, intent)
             ACTION_VOICE_TEXT -> handleVoiceText(intent)
             ACTION_VOICE_SPOKEN -> handleVoiceSpoken(intent)
             ACTION_VOICE_TEST_SPEECH_BEGIN -> handleTestSpeechBegin()
@@ -45,28 +45,39 @@ class VoiceDebugReceiver : BroadcastReceiver() {
         }
         val pending = goAsync()
         TestPcmSpeechGenerator.generate(context, text) { pcm ->
-            if (pcm != null && VoiceDebugBridge.dispatchPcm(pcm)) {
-                VoiceLog.i("Debug", "Streamed PCM utterance for: $text")
-                pending.setResultCode(Activity.RESULT_OK)
-            } else {
-                VoiceLog.w("Debug", "PCM utterance dropped for: $text")
+            if (pcm == null) {
+                VoiceLog.w("Debug", "PCM synthesis failed for: $text")
+                pending.finish()
+                return@generate
             }
-            pending.finish()
+            val accepted = VoiceDebugBridge.dispatchPcm(pcm) {
+                VoiceLog.i("Debug", "PCM utterance streamed for: $text")
+                pending.setResultCode(Activity.RESULT_OK)
+                pending.finish()
+            }
+            if (!accepted) {
+                VoiceLog.w("Debug", "PCM utterance dropped for: $text")
+                pending.finish()
+            }
         }
     }
 
-    private fun handleVoicePcmBytes(intent: Intent) {
+    private fun handleVoicePcmBytes(context: Context, intent: Intent) {
         val encoded = intent.getStringExtra(EXTRA_PCM)?.trim().orEmpty()
         if (encoded.isEmpty()) {
             VoiceLog.w("Debug", "VOICE_PCM_BYTES broadcast missing pcm extra")
             return
         }
         val pcm = Base64.decode(encoded, Base64.DEFAULT)
-        val accepted = VoiceDebugBridge.dispatchPcm(pcm)
-        if (accepted) {
-            VoiceLog.i("Debug", "Streamed raw PCM utterance (${pcm.size} bytes)")
-        } else {
+        val pending = goAsync()
+        val accepted = VoiceDebugBridge.dispatchPcm(pcm) {
+            VoiceLog.i("Debug", "Raw PCM utterance streamed (${pcm.size} bytes)")
+            pending.setResultCode(Activity.RESULT_OK)
+            pending.finish()
+        }
+        if (!accepted) {
             VoiceLog.w("Debug", "Raw PCM utterance dropped — voice session not connected")
+            pending.finish()
         }
     }
 

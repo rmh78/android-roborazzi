@@ -10,7 +10,7 @@ object TestPcmTone {
     fun sineTone(
         durationMs: Long = 500L,
         frequencyHz: Double = 440.0,
-        trailingSilenceMs: Long = 600L,
+        trailingSilenceMs: Long = 1_200L,
     ): ByteArray {
         val speechSamples = (VoiceConstants.SAMPLE_RATE_HZ * durationMs / 1_000L).toInt()
         val speech = ByteArray(speechSamples * 2)

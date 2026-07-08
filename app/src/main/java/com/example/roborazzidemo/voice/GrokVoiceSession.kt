@@ -219,22 +219,29 @@ class GrokVoiceSession(
         sendUserTextTurn(socket, text, logLabel = "spoken user")
     }
 
-    fun sendPcmUtterance(pcmData: ByteArray) {
+    fun sendPcmUtterance(pcmData: ByteArray, onStreamComplete: (() -> Unit)? = null) {
         if (!isUserTurnGateOpen()) {
             VoiceLog.w("Session", "sendPcmUtterance blocked — user turn gate closed")
+            onStreamComplete?.invoke()
             return
         }
         val socket = webSocket ?: run {
             VoiceLog.w("Session", "sendPcmUtterance dropped — socket null")
+            onStreamComplete?.invoke()
             return
         }
         if (!sessionConfigured) {
             VoiceLog.w("Session", "sendPcmUtterance dropped — session not configured")
+            onStreamComplete?.invoke()
             return
         }
         pcmInjectJob?.cancel()
         pcmInjectJob = scope.launch(Dispatchers.IO) {
-            streamPcmUtterance(socket, pcmData)
+            try {
+                streamPcmUtterance(socket, pcmData)
+            } finally {
+                onStreamComplete?.invoke()
+            }
         }
     }
 
@@ -260,7 +267,9 @@ class GrokVoiceSession(
             offset = end
             delay(VoiceConstants.PCM_FRAME_DURATION_MS.toLong())
         }
-        audioCapture.setMuted(false)
+        if (!VoiceDeviceHints.useHalfDuplexVoice()) {
+            audioCapture.setMuted(false)
+        }
         publishVoiceSync()
         VoiceLog.i("Session", "PCM utterance streamed (${pcmData.size} bytes) — awaiting server VAD")
     }
@@ -655,11 +664,15 @@ class GrokVoiceSession(
             (VoiceDeviceHints.useHalfDuplexVoice() && !audioPlayback.isIdle())
 
     private fun resumeMicAfterEmulatorHalfDuplex() {
-        if (!VoiceDeviceHints.useHalfDuplexVoice() || !audioCapture.isMuted()) {
+        if (!VoiceDeviceHints.useHalfDuplexVoice()) {
+            if (!audioCapture.isMuted()) return
+            audioCapture.setMuted(false)
+            VoiceLog.d("Session", "Mic resumed for user turn")
+            publishVoiceSync()
             return
         }
-        audioCapture.setMuted(false)
-        VoiceLog.d("Session", "Emulator half-duplex: mic resumed for user turn")
+        // Emulator E2E: live mic stays muted; user turns use PCM inject.
+        VoiceLog.d("Session", "Emulator half-duplex: live mic stays muted (PCM inject path)")
         publishVoiceSync()
     }
 
@@ -691,11 +704,15 @@ class GrokVoiceSession(
         scope.launch(Dispatchers.IO) {
             try {
                 if (audioCapture.isCapturing()) {
-                    audioCapture.setMuted(false)
+                    if (VoiceDeviceHints.useHalfDuplexVoice()) {
+                        audioCapture.setMuted(true)
+                    } else {
+                        audioCapture.setMuted(false)
+                    }
                     micGate.onCaptureStarted()
                     listener.onStatusChanged("Listening — ask a question")
                     publishVoiceSync()
-                    VoiceLog.i("Session", "Mic unmuted (capture already active)")
+                    VoiceLog.i("Session", "Mic capture already active")
                     return@launch
                 }
                 audioCapture.start(
@@ -716,9 +733,14 @@ class GrokVoiceSession(
                     },
                 )
                 micGate.onCaptureStarted()
+                if (VoiceDeviceHints.useHalfDuplexVoice()) {
+                    audioCapture.setMuted(true)
+                    VoiceLog.i("Session", "Emulator capture active — live mic muted (PCM inject path)")
+                } else {
+                    VoiceLog.i("Session", "Mic streaming active (20ms PCM16 chunks)")
+                }
                 listener.onStatusChanged("Listening — ask a question")
                 publishVoiceSync()
-                VoiceLog.i("Session", "Mic streaming active (20ms PCM16 chunks)")
             } catch (e: Exception) {
                 VoiceLog.e("Session", "Audio capture failed", e)
                 listener.onError(e.message ?: "Microphone capture failed", recoverable = true)

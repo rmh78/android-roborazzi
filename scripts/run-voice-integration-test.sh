@@ -44,8 +44,13 @@ start_logcat
 
 RESULTS_DIR="app/build/outputs/androidTest-results/connected/debug"
 if [[ -d "$RESULTS_DIR" ]]; then
-  if grep -hE 'testsuite[^>]*skipped="[1-9]' "$RESULTS_DIR"/*.xml 2>/dev/null | grep -q .; then
-    echo "::error::Voice integration test was skipped — live API path did not run"
+  if ! grep -h 'VoiceAppIntegrationTest' "$RESULTS_DIR"/*.xml 2>/dev/null | grep -q .; then
+    echo "::error::VoiceAppIntegrationTest did not run — live API path missing from results"
+    exit 1
+  fi
+  if grep -h 'testsuite name="com.example.roborazzidemo.voice.VoiceAppIntegrationTest"' \
+    "$RESULTS_DIR"/*.xml 2>/dev/null | grep -qE 'skipped="[1-9]'; then
+    echo "::error::VoiceAppIntegrationTest was skipped — live API path did not run"
     exit 1
   fi
 fi

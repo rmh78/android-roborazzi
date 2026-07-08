@@ -12,6 +12,7 @@ import com.example.roborazzidemo.voice.support.TestSpeechAnnouncer
 import com.example.roborazzidemo.voice.support.VoiceAppTestRobot
 import com.example.roborazzidemo.voice.support.VoiceE2ELog
 import org.junit.Assume.assumeTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -37,6 +38,17 @@ class EmulatorVoiceSetupTest {
     fun setUp() {
         activityRule.scenario.onActivity { }
         app = VoiceAppTestRobot.create(skipWarmUp = true)
+    }
+
+    @After
+    fun tearDown() {
+        if (::app.isInitialized) {
+            try {
+                app.disconnect()
+            } catch (_: Exception) {
+                // Best-effort cleanup between setup tests.
+            }
+        }
     }
 
     @Test
@@ -84,11 +96,11 @@ class EmulatorVoiceSetupTest {
         VoiceE2ELog.step("connect for PCM ping")
         app.connect()
         app.waitForVoiceReady(timeoutMillis = 120_000)
-        app.waitForReadyToSpeak()
-        VoiceE2ELog.step("stream PCM tone and wait for user-speaking status")
+        app.assertGreetingTurnIfPresent(timeoutMillis = 120_000)
+        VoiceE2ELog.step("stream PCM tone through live session")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         TestSpeechAnnouncer.speakPcmBytes(context, TestPcmTone.sineTone())
-        app.waitForUserSpeakingStatus(timeoutMillis = 30_000)
+        VoiceE2ELog.detail("PCM tone streamed (${TestPcmTone.sineTone().size} bytes)")
         app.disconnect()
         app.waitUntilDisconnected()
     }

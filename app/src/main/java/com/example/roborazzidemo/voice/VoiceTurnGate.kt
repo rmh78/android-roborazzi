@@ -22,5 +22,5 @@ internal object VoiceTurnGate {
             !testUserSpeechPlayback &&
             micGateState == MicCaptureGate.State.Streaming &&
             captureActive &&
-            !captureMuted
+            (!captureMuted || VoiceDeviceHints.useHalfDuplexVoice())
 }

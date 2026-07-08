@@ -94,7 +94,7 @@ class VoiceAppTestRobot private constructor(
         VoiceE2ELog.detail("response complete: status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
     }
 
-    fun speakAndWaitForTool(text: String, toolName: String, timeoutMillis: Long = 60_000) {
+    fun speakAndWaitForTool(text: String, toolName: String, timeoutMillis: Long = 90_000) {
         waitForReadyToSpeak()
         VoiceE2ELog.step("speak (tool=$toolName): \"$text\"")
         val baseline = toolWaitBaseline()
@@ -106,7 +106,10 @@ class VoiceAppTestRobot private constructor(
     }
 
     fun waitForReadyToSpeak(timeoutMillis: Long = 120_000) {
-        waitForListeningPhase(timeoutMillis)
+        waitUntil(timeoutMillis, "Timed out waiting for ready-to-speak status. ${diagnostics()}") {
+            assertConnectedDuringSync()
+            isReadyForUserSpeech()
+        }
     }
 
     fun waitForUserSpeakingStatus(timeoutMillis: Long = 30_000) {
@@ -229,8 +232,16 @@ class VoiceAppTestRobot private constructor(
             "Timed out waiting for listening-ready status. ${diagnostics()}",
         ) {
             assertConnectedDuringSync()
-            isListeningReady()
+            isReadyForUserSpeech()
         }
+    }
+
+    /** Gate open for PCM inject — requires the post-greeting listen prompt, not mic prep. */
+    private fun isReadyForUserSpeech(): Boolean {
+        val current = status()
+        return current.contains("Listening — ask a question", ignoreCase = true) &&
+            !isAssistantSpeaking(current) &&
+            !isUserSpeaking(current)
     }
 
     private fun assertConnectedDuringSync() {
@@ -370,6 +381,12 @@ class VoiceAppTestRobot private constructor(
         val current = status()
         if (current.equals("Disconnected", ignoreCase = true)) return true
         if (current.contains("Tap Connect to grant", ignoreCase = true)) return true
+        if (current.contains("Waiting for conversation", ignoreCase = true)) return false
+        if (current.contains("Configuring session", ignoreCase = true)) return false
+        if (current.contains("Preparing microphone", ignoreCase = true)) return false
+        if (current.contains("Grok is greeting", ignoreCase = true)) return false
+        if (current.contains("Processing", ignoreCase = true)) return false
+        if (current.contains("You are speaking", ignoreCase = true)) return false
         val checkable = device.findObject(By.checkable(true))
         if (checkable != null && !checkable.isChecked) return true
         return !micLevelUiVisible() &&

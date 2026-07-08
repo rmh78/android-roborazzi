@@ -18,7 +18,7 @@ import kotlin.math.sin
  */
 object TestPcmSpeechGenerator {
     private const val SYNTH_TIMEOUT_MS = 45_000L
-    private const val TRAILING_SILENCE_MS = 600L
+    private const val TRAILING_SILENCE_MS = 1_200L
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val pending = mutableListOf<PendingGenerate>()
