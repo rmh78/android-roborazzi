@@ -58,7 +58,8 @@ class SyntheticMicLevelAnimator(
     }
 
     companion object {
-        private const val PULSE_INTERVAL_MS = 80L
+        /** Coarser ticks — SIG meter does not need 12 Hz updates. */
+        private const val PULSE_INTERVAL_MS = 120L
 
         fun estimateSpeechDuration(text: String): Long {
             val trimmed = text.trim()

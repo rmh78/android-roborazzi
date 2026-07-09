@@ -132,7 +132,7 @@ Registered in [`VoiceDebugReceiver.kt`](../app/src/debug/java/com/example/robora
 | `com.example.roborazzidemo.VOICE_SPOKEN` | `text` | Inject spoken user turn (E2E primary path) |
 | `com.example.roborazzidemo.VOICE_TEXT` | `text` | Inject text turn (direct-speech debug) |
 | `com.example.roborazzidemo.VOICE_DISCONNECT` | — | Disconnect session |
-| `com.example.roborazzidemo.VOICE_TEST_ANNOUNCE` | `text` | TTS playback (E2E speech simulation) |
+| `com.example.roborazzidemo.VOICE_TEST_ANNOUNCE` | `text`, optional `speech_mode` (`beep`/`tts`) | E2E user-turn cue (beep default) |
 | `com.example.roborazzidemo.VOICE_TEST_SPEECH_BEGIN/END` | — | Mute mic during TTS playback |
 
 `VoiceDebugBridge` is populated by `VoiceAssistantViewModel` on connect and cleared on disconnect.

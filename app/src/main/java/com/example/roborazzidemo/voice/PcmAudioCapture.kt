@@ -244,27 +244,20 @@ class PcmAudioCapture(
         val record = audioRecord ?: return
         val frameBuffer = ByteArray(FRAME_SIZE_BYTES)
         var chunksSent = 0
-        var mutedFramesDrained = 0
 
         while (isCapturing) {
-            // Always read while muted so AudioRecord does not overflow and deliver
-            // stale buffered audio on unmute (critical for emulator half-duplex).
+            if (isMuted) {
+                // Cheap mute: non-blocking discard + sleep. Avoid stop/start thrashing
+                // (expensive on AVDs every E2E user turn) and avoid busy spin-drain.
+                _audioLevel.value = 0f
+                drainPendingFrames(record, frameBuffer)
+                Thread.sleep(MUTE_YIELD_MS)
+                continue
+            }
+
             val bytesRead = record.read(frameBuffer, 0, FRAME_SIZE_BYTES)
             when {
                 bytesRead > 0 -> {
-                    if (isMuted) {
-                        _audioLevel.value = 0f
-                        mutedFramesDrained++
-                        if (mutedFramesDrained == 1 || mutedFramesDrained % MIC_LEVEL_LOG_INTERVAL == 0) {
-                            VoiceLog.d(
-                                "Mic",
-                                "Muted drain active (frames=$mutedFramesDrained, " +
-                                    "source=${activeSource?.let(::sourceName)})",
-                            )
-                        }
-                        continue
-                    }
-                    mutedFramesDrained = 0
                     val chunk = if (bytesRead == frameBuffer.size) {
                         frameBuffer
                     } else {
@@ -289,6 +282,21 @@ class PcmAudioCapture(
                     isCapturing = false
                 }
             }
+        }
+    }
+
+    private fun drainPendingFrames(record: AudioRecord, frameBuffer: ByteArray) {
+        // Drop whatever is already buffered so unmute does not flush stale PCM upstream.
+        var reads = 0
+        while (reads < MUTE_DRAIN_MAX_READS) {
+            val n = record.read(
+                frameBuffer,
+                0,
+                FRAME_SIZE_BYTES,
+                AudioRecord.READ_NON_BLOCKING,
+            )
+            if (n <= 0) break
+            reads++
         }
     }
 
@@ -401,6 +409,9 @@ class PcmAudioCapture(
             (SAMPLE_RATE_HZ * FRAME_DURATION_MS / 1000 * BYTES_PER_SAMPLE).toInt()
         private const val MIC_LEVEL_LOG_INTERVAL = 50
         private const val LEVEL_UI_GAIN = 10f
+        /** Yield while muted so the capture thread does not spin. */
+        private const val MUTE_YIELD_MS = 40L
+        private const val MUTE_DRAIN_MAX_READS = 8
         private const val PROBE_FRAMES = 15
         private const val SILENT_SOURCE_MAX_RMS = 0.0005f
         private const val SIGNAL_FRAME_RMS = 0.002f

@@ -70,13 +70,21 @@ Logging uses tag `VoiceE2E` via [`VoiceE2ELog.kt`](../app/src/androidTest/java/c
 
 E2E does not rely on host microphone input. [`TestSpeechAnnouncer.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/support/TestSpeechAnnouncer.kt) uses:
 
-1. Optional emulator TTS playback (audible on AVD)
-2. `VOICE_SPOKEN` debug broadcast to inject the user turn into the live session
+1. Short user-turn **beep** by default (`ToneGenerator` — low CPU; avoids emulator TTS spikes)
+2. `VOICE_SPOKEN` debug broadcast to inject the real user turn into the live session
 
-This avoids host-mic flakiness in CI. Disable TTS playback with:
+Mic is muted during the cue so the beep does not re-enter server VAD.
 
 ```bash
+# Default: short beep + inject (recommended)
+./gradlew :app:connectedDebugAndroidTest ...
+
+# Inject only (no audible cue)
 -Pandroid.testInstrumentationRunnerArguments.disableTestSpeechPlayback=true
+# or: -Pandroid.testInstrumentationRunnerArguments.testSpeechMode=none
+
+# Full spoken prompts via TextToSpeech (higher CPU on AVD)
+-Pandroid.testInstrumentationRunnerArguments.testSpeechMode=tts
 ```
 
 ## Semantics contract

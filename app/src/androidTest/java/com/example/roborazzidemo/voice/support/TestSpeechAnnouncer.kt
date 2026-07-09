@@ -10,35 +10,54 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * Plays audible user TTS, then injects the turn via [VoiceDebugReceiver.ACTION_VOICE_SPOKEN].
- * The robot waits for listening-ready status before calling [speak].
+ * Audible user-turn cue, then inject via [VoiceDebugReceiver.ACTION_VOICE_SPOKEN].
  *
- * Order: mute mic → TTS (user hears the prompt) → unmute → inject (transcript + server turn).
- * Inject is retried while the user-turn gate is still closed (e.g. brief post-Hello mic spin-up).
+ * Default cue is a short system **beep** (low CPU). Full TTS of the prompt is opt-in only
+ * (`testSpeechMode=tts`) because emulator TextToSpeech spikes CPU and often sounds harsh.
+ *
+ * Order: mute mic → cue → unmute → inject (retry while gate closed).
  */
 object TestSpeechAnnouncer {
-    private const val WARMUP_MS = 2_000L
-    private const val TTS_TIMEOUT_MS = 45_000L
+    private const val WARMUP_MS = 500L
+    private const val CUE_TIMEOUT_MS = 45_000L
     private const val INJECT_ATTEMPTS = 12
     private const val INJECT_RETRY_MS = 500L
     private const val INJECT_RESULT_TIMEOUT_MS = 5_000L
 
+    private enum class Mode { None, Beep, Tts }
+
     fun warmUp(context: Context) {
-        if (!speechEnabled()) return
-        context.sendBroadcast(
-            Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_WARMUP).setPackage(context.packageName),
-        )
-        Thread.sleep(WARMUP_MS)
+        when (speechMode()) {
+            Mode.None -> Unit
+            Mode.Beep -> {
+                // No TTS engine warm-up needed for ToneGenerator.
+                context.sendBroadcast(
+                    Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_WARMUP)
+                        .setPackage(context.packageName)
+                        .putExtra(VoiceDebugReceiver.EXTRA_SPEECH_MODE, "beep"),
+                )
+                Thread.sleep(WARMUP_MS)
+            }
+            Mode.Tts -> {
+                context.sendBroadcast(
+                    Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_WARMUP)
+                        .setPackage(context.packageName)
+                        .putExtra(VoiceDebugReceiver.EXTRA_SPEECH_MODE, "tts"),
+                )
+                Thread.sleep(2_000L)
+            }
+        }
     }
 
     fun speak(context: Context, text: String) {
-        if (speechEnabled()) {
+        val mode = speechMode()
+        if (mode != Mode.None) {
             context.sendBroadcast(
                 Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_SPEECH_BEGIN)
                     .setPackage(context.packageName),
             )
             try {
-                playTts(context, text)
+                playCue(context, text, mode)
             } finally {
                 context.sendBroadcast(
                     Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_SPEECH_END)
@@ -93,16 +112,30 @@ object TestSpeechAnnouncer {
         return accepted
     }
 
-    private fun speechEnabled(): Boolean =
-        InstrumentationRegistry.getArguments().getString("disableTestSpeechPlayback") != "true"
+    private fun speechMode(): Mode {
+        val args = InstrumentationRegistry.getArguments()
+        if (args.getString("disableTestSpeechPlayback") == "true") return Mode.None
+        return when (args.getString("testSpeechMode")?.lowercase()) {
+            "none", "off", "inject" -> Mode.None
+            "tts", "speech" -> Mode.Tts
+            "beep", null, "" -> Mode.Beep
+            else -> Mode.Beep
+        }
+    }
 
-    private fun playTts(context: Context, text: String) {
+    private fun playCue(context: Context, text: String, mode: Mode) {
+        val modeExtra = when (mode) {
+            Mode.Tts -> "tts"
+            Mode.Beep -> "beep"
+            Mode.None -> return
+        }
         val latch = CountDownLatch(1)
         var ok = false
         context.sendOrderedBroadcast(
             Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_ANNOUNCE)
                 .setPackage(context.packageName)
-                .putExtra(VoiceDebugReceiver.EXTRA_TEXT, text),
+                .putExtra(VoiceDebugReceiver.EXTRA_TEXT, text)
+                .putExtra(VoiceDebugReceiver.EXTRA_SPEECH_MODE, modeExtra),
             null,
             object : BroadcastReceiver() {
                 override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -115,9 +148,9 @@ object TestSpeechAnnouncer {
             null,
             null,
         )
-        check(latch.await(TTS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-            "Timed out waiting for emulator TTS: \"$text\""
+        check(latch.await(CUE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+            "Timed out waiting for user-turn cue: \"$text\""
         }
-        check(ok) { "Emulator TTS failed for: \"$text\"" }
+        check(ok) { "User-turn cue failed for: \"$text\"" }
     }
 }

@@ -158,7 +158,7 @@ adb shell am force-stop com.example.roborazzidemo
 
 The test uses emulator TTS plus debug `VOICE_SPOKEN` injects to simulate user speech. Typical runtime is 2–5 minutes.
 
-Optional: disable TTS playback (inject only) with `-Pandroid.testInstrumentationRunnerArguments.disableTestSpeechPlayback=true`.
+User-turn audio defaults to a short **beep** (low CPU). Inject-only: `disableTestSpeechPlayback=true`. Full TTS prompts: `testSpeechMode=tts`.
 
 **CI:** Pull requests run this test on a hardware-accelerated emulator. Add an `XAI_API_KEY` [repository secret](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions); without it the workflow fails fast. See [docs/voice-e2e-testing.md](docs/voice-e2e-testing.md) for the robot harness, semantics contract, and [docs/ci-and-development.md](docs/ci-and-development.md) for workflow details.
 

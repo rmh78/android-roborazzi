@@ -8,7 +8,7 @@ import android.content.Intent
 class VoiceDebugReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            ACTION_VOICE_TEST_WARMUP -> TestSpeechSpeaker.warmUp(context)
+            ACTION_VOICE_TEST_WARMUP -> handleTestWarmup(context, intent)
             ACTION_VOICE_TEST_ANNOUNCE -> handleTestAnnounce(context, intent)
             ACTION_VOICE_TEXT -> handleVoiceText(intent)
             ACTION_VOICE_SPOKEN -> handleVoiceSpoken(intent)
@@ -19,6 +19,10 @@ class VoiceDebugReceiver : BroadcastReceiver() {
         }
     }
 
+    private fun handleTestWarmup(context: Context, intent: Intent) {
+        TestSpeechSpeaker.warmUp(context, speechModeFrom(intent))
+    }
+
     private fun handleTestAnnounce(context: Context, intent: Intent) {
         val text = intent.getStringExtra(EXTRA_TEXT)?.trim().orEmpty()
         if (text.isEmpty()) {
@@ -26,13 +30,19 @@ class VoiceDebugReceiver : BroadcastReceiver() {
             return
         }
         val pending = goAsync()
-        TestSpeechSpeaker.speak(context, text) { success ->
+        TestSpeechSpeaker.announce(context, text, speechModeFrom(intent)) { success ->
             if (success) {
                 pending.setResultCode(Activity.RESULT_OK)
             }
             pending.finish()
         }
     }
+
+    private fun speechModeFrom(intent: Intent): TestSpeechSpeaker.Mode =
+        when (intent.getStringExtra(EXTRA_SPEECH_MODE)?.lowercase()) {
+            "tts", "speech" -> TestSpeechSpeaker.Mode.Tts
+            else -> TestSpeechSpeaker.Mode.Beep
+        }
 
     private fun handleVoiceText(intent: Intent) {
         val text = intent.getStringExtra(EXTRA_TEXT)?.trim().orEmpty()
@@ -102,5 +112,7 @@ class VoiceDebugReceiver : BroadcastReceiver() {
         const val ACTION_VOICE_TEST_SPEECH_END = "com.example.roborazzidemo.VOICE_TEST_SPEECH_END"
         const val ACTION_VOICE_DISCONNECT = "com.example.roborazzidemo.VOICE_DISCONNECT"
         const val EXTRA_TEXT = "text"
+        /** `beep` (default, low CPU) or `tts` (full prompt speech). */
+        const val EXTRA_SPEECH_MODE = "speech_mode"
     }
 }
