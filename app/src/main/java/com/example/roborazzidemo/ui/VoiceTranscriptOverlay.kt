@@ -50,6 +50,7 @@ import com.example.roborazzidemo.viewmodel.VoiceUiState
 fun VoiceTranscriptOverlay(
     state: VoiceUiState,
     onConnectChange: (Boolean) -> Unit,
+    onVoiceSelected: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -120,6 +121,17 @@ fun VoiceTranscriptOverlay(
                 }
             }
 
+            if (state.hasApiKey) {
+                VoicePicker(
+                    selectedVoiceId = state.selectedVoiceId,
+                    availableVoices = state.availableVoices,
+                    voicesLoading = state.voicesLoading,
+                    voicesLoadError = state.voicesLoadError,
+                    enabled = !state.voicesLoading || state.availableVoices.isNotEmpty(),
+                    onVoiceSelected = onVoiceSelected,
+                )
+            }
+
             Text(
                 text = disconnectedStatus(state),
                 style = MaterialTheme.typography.labelSmall,
@@ -159,6 +171,17 @@ fun VoiceTranscriptOverlay(
                         contentDescription = "voice-mic-level"
                     },
                 )
+
+                state.emulatorMicHint?.let { hint ->
+                    Text(
+                        text = hint,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.semantics {
+                            contentDescription = "voice-emulator-mic-hint"
+                        },
+                    )
+                }
 
                 if (state.lastToolName.isNotBlank()) {
                     Text(

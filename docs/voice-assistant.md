@@ -40,16 +40,16 @@ sequenceDiagram
 
 | File | Responsibility |
 |------|----------------|
-| [`GrokVoiceSession.kt`](../app/src/main/java/com/example/roborazzidemo/voice/GrokVoiceSession.kt) | WebSocket client, PCM capture/playback, event handling, turn gating, half-duplex |
+| [`GrokVoiceSession.kt`](../app/src/main/java/com/example/roborazzidemo/voice/GrokVoiceSession.kt) | WebSocket client, PCM capture/playback, event handling, turn gating, emulator half-duplex |
 | [`VoiceSessionUpdateBuilder.kt`](../app/src/main/java/com/example/roborazzidemo/voice/VoiceSessionUpdateBuilder.kt) | `session.update` JSON: model, VAD, instructions, tools |
 | [`VoiceToolDefinitions.kt`](../app/src/main/java/com/example/roborazzidemo/voice/VoiceToolDefinitions.kt) | Tool schemas sent to xAI |
 | [`VoiceToolExecutor.kt`](../app/src/main/java/com/example/roborazzidemo/voice/VoiceToolExecutor.kt) | Client-side tool dispatch |
 | [`VoiceNavigationHandler.kt`](../app/src/main/java/com/example/roborazzidemo/navigation/VoiceNavigationHandler.kt) | `navigate_to_screen`, `navigate_back` |
 | [`VoiceAssistantViewModel.kt`](../app/src/main/java/com/example/roborazzidemo/viewmodel/VoiceAssistantViewModel.kt) | `VoiceSessionListener`, `VoiceUiState`, debug bridge wiring |
-| [`PcmAudioCapture.kt`](../app/src/main/java/com/example/roborazzidemo/voice/PcmAudioCapture.kt) | Mic streaming with AEC on hardware |
-| [`PcmAudioPlayback.kt`](../app/src/main/java/com/example/roborazzidemo/voice/PcmAudioPlayback.kt) | Speaker output, barge-in flush |
-| [`VoiceAudioRoute.kt`](../app/src/main/java/com/example/roborazzidemo/voice/VoiceAudioRoute.kt) | `MODE_IN_COMMUNICATION` routing |
-| [`VoiceDeviceHints.kt`](../app/src/main/java/com/example/roborazzidemo/voice/VoiceDeviceHints.kt) | Emulator vs device strategy selection |
+| [`PcmAudioCapture.kt`](../app/src/main/java/com/example/roborazzidemo/voice/PcmAudioCapture.kt) | Mic streaming (xAI-aligned PCM16 20 ms frames); AEC on hardware; drain-while-muted |
+| [`PcmAudioPlayback.kt`](../app/src/main/java/com/example/roborazzidemo/voice/PcmAudioPlayback.kt) | Speaker output, barge-in flush, playback-idle drain for turn gate |
+| [`VoiceAudioRoute.kt`](../app/src/main/java/com/example/roborazzidemo/voice/VoiceAudioRoute.kt) | `MODE_IN_COMMUNICATION` on devices only (skipped on AVD) |
+| [`VoiceDeviceHints.kt`](../app/src/main/java/com/example/roborazzidemo/voice/VoiceDeviceHints.kt) | Emulator vs device strategy: sources, VAD, half-duplex, effects |
 
 ## Voice tools
 
@@ -86,31 +86,40 @@ Android emulators lack working AEC. On a typical Mac setup:
 Grok speaks → host speakers → Mac mic → AVD virtual mic → Grok hears itself → echo loop
 ```
 
-**Mitigations in this app:**
+**Mitigations in this app** ([`VoiceDeviceHints`](../app/src/main/java/com/example/roborazzidemo/voice/VoiceDeviceHints.kt)):
 
-- Mute mic while Grok is speaking (`response.created` / audio deltas)
+- **Greeting first:** open mic only after Hello PCM has fully drained (concurrent `AudioRecord` silences AVD speakers)
+- Mute uplink while Grok is speaking (`response.created` / playback drain)
+- Keep reading `AudioRecord` while muted (drain, do not append) so buffers do not overflow
 - Resume after playback drains + ~450 ms tail
-- Do **not** send `input_audio_buffer.clear` — server VAD owns committed audio
+- Skip `MODE_IN_COMMUNICATION` (it often silences the virtual mic)
+- Skip platform AEC/NS/AGC (often available-but-broken on AVDs)
+- Raise `STREAM_MUSIC` volume if too low (USAGE_MEDIA playback)
+- Fall back capture sources: `VOICE_COMMUNICATION` → `MIC` → `DEFAULT` (quiet probe no longer fails capture)
+- Stricter server VAD (`threshold=0.7`, `silence_duration_ms=500`) to reduce false commits
+- Overlay hint when sustained silence is detected (`voice-emulator-mic-hint`)
 - No barge-in on emulator
 
 Expect turn-taking: wait for **Listening — ask a question** before speaking.
 
 **Tips for AVD testing:**
 
+- `scripts/start-voice-emulator.sh` (boots API 34 AVD + `adb emu avd hostmicon`)
+- Or `scripts/enable-emulator-mic.sh` on an already-running emulator
 - Extended Controls → Microphone → enable *Virtual microphone uses host audio input*
 - Use headphones to prevent speaker → mic feedback
 - Lower host mic gain in macOS Sound settings
 - For CI/scripted runs, use TTS + `VOICE_SPOKEN` injects (see [voice-e2e-testing.md](voice-e2e-testing.md))
 
-### Physical device: full-duplex
+### Physical device: full-duplex (xAI demo aligned)
 
 On real hardware (following the [xAI Android Voice demo](https://github.com/xai-org/xai-cookbook/tree/main/Android/VoiceApiAndroidExample)):
 
 - **Audio route:** `MODE_IN_COMMUNICATION` with speakerphone on
 - **Mic source:** `VOICE_COMMUNICATION` with platform AEC, noise suppression, AGC
-- **Full duplex:** mic streams continuously; nothing muted client-side
+- **Full duplex:** mic streams continuously; nothing muted client-side for assistant speech
 - **Barge-in:** speaking while Grok talks flushes playback and takes over
-- **Server VAD:** turn detection on server; client does not implement end-of-utterance
+- **Server VAD:** defaults (`type=server_vad` only); client does not implement end-of-utterance
 
 Use a real device when validating natural voice UX.
 
@@ -123,7 +132,7 @@ Registered in [`VoiceDebugReceiver.kt`](../app/src/debug/java/com/example/robora
 | `com.example.roborazzidemo.VOICE_SPOKEN` | `text` | Inject spoken user turn (E2E primary path) |
 | `com.example.roborazzidemo.VOICE_TEXT` | `text` | Inject text turn (direct-speech debug) |
 | `com.example.roborazzidemo.VOICE_DISCONNECT` | — | Disconnect session |
-| `com.example.roborazzidemo.VOICE_TEST_ANNOUNCE` | `text` | TTS playback (E2E speech simulation) |
+| `com.example.roborazzidemo.VOICE_TEST_ANNOUNCE` | `text`, optional `speech_mode` (`beep`/`tts`) | E2E user-turn cue (beep default) |
 | `com.example.roborazzidemo.VOICE_TEST_SPEECH_BEGIN/END` | — | Mute mic during TTS playback |
 
 `VoiceDebugBridge` is populated by `VoiceAssistantViewModel` on connect and cleared on disconnect.

@@ -8,7 +8,8 @@ import android.content.Intent
 class VoiceDebugReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            ACTION_VOICE_TEST_WARMUP -> TestSpeechSpeaker.warmUp(context)
+            ACTION_VOICE_E2E_MODE -> handleE2eMode(intent)
+            ACTION_VOICE_TEST_WARMUP -> handleTestWarmup(context, intent)
             ACTION_VOICE_TEST_ANNOUNCE -> handleTestAnnounce(context, intent)
             ACTION_VOICE_TEXT -> handleVoiceText(intent)
             ACTION_VOICE_SPOKEN -> handleVoiceSpoken(intent)
@@ -19,6 +20,22 @@ class VoiceDebugReceiver : BroadcastReceiver() {
         }
     }
 
+    private fun handleE2eMode(intent: Intent) {
+        val injectOnly = intent.getBooleanExtra(EXTRA_INJECT_ONLY, true)
+        val skipCapture = intent.getBooleanExtra(EXTRA_SKIP_LIVE_CAPTURE, injectOnly)
+        if (injectOnly || skipCapture) {
+            VoiceDebugBridge.enableE2eInjectOnlyMode()
+            resultCode = Activity.RESULT_OK
+        } else {
+            VoiceDebugBridge.clearE2eMode()
+            resultCode = Activity.RESULT_OK
+        }
+    }
+
+    private fun handleTestWarmup(context: Context, intent: Intent) {
+        TestSpeechSpeaker.warmUp(context, speechModeFrom(intent))
+    }
+
     private fun handleTestAnnounce(context: Context, intent: Intent) {
         val text = intent.getStringExtra(EXTRA_TEXT)?.trim().orEmpty()
         if (text.isEmpty()) {
@@ -26,13 +43,19 @@ class VoiceDebugReceiver : BroadcastReceiver() {
             return
         }
         val pending = goAsync()
-        TestSpeechSpeaker.speak(context, text) { success ->
+        TestSpeechSpeaker.announce(context, text, speechModeFrom(intent)) { success ->
             if (success) {
                 pending.setResultCode(Activity.RESULT_OK)
             }
             pending.finish()
         }
     }
+
+    private fun speechModeFrom(intent: Intent): TestSpeechSpeaker.Mode =
+        when (intent.getStringExtra(EXTRA_SPEECH_MODE)?.lowercase()) {
+            "tts", "speech" -> TestSpeechSpeaker.Mode.Tts
+            else -> TestSpeechSpeaker.Mode.Beep
+        }
 
     private fun handleVoiceText(intent: Intent) {
         val text = intent.getStringExtra(EXTRA_TEXT)?.trim().orEmpty()
@@ -52,13 +75,19 @@ class VoiceDebugReceiver : BroadcastReceiver() {
         val text = intent.getStringExtra(EXTRA_TEXT)?.trim().orEmpty()
         if (text.isEmpty()) {
             VoiceLog.w("Debug", "VOICE_SPOKEN broadcast missing text extra")
+            resultCode = Activity.RESULT_CANCELED
             return
         }
         val accepted = VoiceDebugBridge.dispatchSpoken(text)
         if (accepted) {
             VoiceLog.i("Debug", "Injected spoken user message: $text")
+            resultCode = Activity.RESULT_OK
         } else {
-            VoiceLog.w("Debug", "Spoken user message dropped — voice session not connected")
+            VoiceLog.w(
+                "Debug",
+                "Spoken user message dropped — session missing or user-turn gate closed",
+            )
+            resultCode = Activity.RESULT_CANCELED
         }
     }
 
@@ -88,6 +117,7 @@ class VoiceDebugReceiver : BroadcastReceiver() {
     }
 
     companion object {
+        const val ACTION_VOICE_E2E_MODE = "com.example.roborazzidemo.VOICE_E2E_MODE"
         const val ACTION_VOICE_TEST_WARMUP = "com.example.roborazzidemo.VOICE_TEST_WARMUP"
         const val ACTION_VOICE_TEST_ANNOUNCE = "com.example.roborazzidemo.VOICE_TEST_ANNOUNCE"
         const val ACTION_VOICE_TEXT = "com.example.roborazzidemo.VOICE_TEXT"
@@ -96,5 +126,9 @@ class VoiceDebugReceiver : BroadcastReceiver() {
         const val ACTION_VOICE_TEST_SPEECH_END = "com.example.roborazzidemo.VOICE_TEST_SPEECH_END"
         const val ACTION_VOICE_DISCONNECT = "com.example.roborazzidemo.VOICE_DISCONNECT"
         const val EXTRA_TEXT = "text"
+        /** `beep` or `tts` when using optional audible cues. */
+        const val EXTRA_SPEECH_MODE = "speech_mode"
+        const val EXTRA_INJECT_ONLY = "inject_only"
+        const val EXTRA_SKIP_LIVE_CAPTURE = "skip_live_capture"
     }
 }

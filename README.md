@@ -132,9 +132,16 @@ Session config uses `grok-voice-latest`, voice `eve`, server VAD, and an **Answe
 
 ### Emulator vs physical device
 
-Voice behaves very differently on an AVD than on a real phone. Emulators use **half-duplex** (mic muted while Grok speaks; no barge-in) to avoid echo loops. Physical devices use **full-duplex** with hardware AEC and barge-in for natural conversation.
+Voice behaves very differently on an AVD than on a real phone. Emulators use **half-duplex** (mic muted while Grok speaks; no barge-in) to avoid echo loops. Physical devices follow the [xAI Android demo](https://github.com/xai-org/xai-cookbook/tree/main/Android/VoiceApiAndroidExample): **full-duplex** with hardware AEC and barge-in.
 
 Expect turn-taking on emulators: wait for **Listening — ask a question** before you speak. Use headphones when testing on an AVD.
+
+```bash
+# Boot a voice-friendly API 34 AVD and enable host mic input
+./scripts/start-voice-emulator.sh
+# Or on an already-running emulator:
+./scripts/enable-emulator-mic.sh
+```
 
 See [docs/voice-assistant.md](docs/voice-assistant.md) for the echo-loop diagram, audio routing details, debug broadcasts, and tool execution paths.
 
@@ -151,7 +158,7 @@ adb shell am force-stop com.example.roborazzidemo
 
 The test uses emulator TTS plus debug `VOICE_SPOKEN` injects to simulate user speech. Typical runtime is 2–5 minutes.
 
-Optional: disable TTS playback (inject only) with `-Pandroid.testInstrumentationRunnerArguments.disableTestSpeechPlayback=true`.
+E2E user turns are **text inject only** (no live mic, no TTS) for stable low CPU on AVDs. Optional cues: `testSpeechMode=beep` or `tts`.
 
 **CI:** Pull requests run this test on a hardware-accelerated emulator. Add an `XAI_API_KEY` [repository secret](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions); without it the workflow fails fast. See [docs/voice-e2e-testing.md](docs/voice-e2e-testing.md) for the robot harness, semantics contract, and [docs/ci-and-development.md](docs/ci-and-development.md) for workflow details.
 

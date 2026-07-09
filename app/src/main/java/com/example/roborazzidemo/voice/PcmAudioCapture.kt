@@ -20,10 +20,10 @@ import java.nio.ByteOrder
 import kotlin.math.sqrt
 
 /**
- * Mic capture based on xAI's
+ * Mic capture aligned with xAI's
  * [VoiceAudioCapture](https://github.com/xai-org/xai-cookbook/tree/main/Android/VoiceApiAndroidExample):
- * PCM16 @ 24 kHz, 20 ms frames, platform noise/echo/gain effects, and mute (not stop/start).
- * Emulators try [MediaRecorder.AudioSource.MIC] first because VOICE_COMMUNICATION is often silent.
+ * PCM16 @ 24 kHz, 20 ms frames, [MediaRecorder.AudioSource.VOICE_COMMUNICATION] on devices,
+ * platform noise/echo/gain effects, and mute (not stop/start).
  */
 class PcmAudioCapture(
     private val context: Context,
@@ -41,30 +41,50 @@ class PcmAudioCapture(
     @Volatile
     private var activeSource: Int? = null
 
+    @Volatile
+    private var silentFrameCount = 0
+
+    @Volatile
+    private var onInputSilent: (() -> Unit)? = null
+
     private val _audioLevel = MutableStateFlow(0f)
     val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
+
+    fun setOnInputSilentListener(listener: (() -> Unit)?) {
+        onInputSilent = listener
+    }
 
     fun setMuted(muted: Boolean) {
         isMuted = muted
         if (muted) {
             _audioLevel.value = 0f
+            silentFrameCount = 0
         }
     }
 
     fun isMuted(): Boolean = isMuted
 
-    fun start(onChunk: (String) -> Unit, onFailure: (String) -> Unit = {}) {
+    fun start(
+        onChunk: (String) -> Unit,
+        onFailure: (String) -> Unit = {},
+        startMuted: Boolean = false,
+    ) {
         if (isCapturing) {
-            setMuted(false)
+            setMuted(startMuted)
             return
         }
         stop()
         isCapturing = true
-        isMuted = false
+        isMuted = startMuted
+        silentFrameCount = 0
         recordingThread = Thread(
             {
-                val sources = VoiceDeviceHints.preferredCaptureSources()
+                val sources = VoiceDeviceHints.captureSources()
                 var lastError: String? = null
+                // Prefer a source that shows energy, but never reject a working AudioRecord
+                // just because the room is quiet — silence at connect is normal.
+                var fallbackSource: Int? = null
+                var fallbackMaxRms = -1f
 
                 for (source in sources) {
                     if (!isCapturing) return@Thread
@@ -79,13 +99,21 @@ class PcmAudioCapture(
 
                     if (VoiceDeviceHints.isLikelyEmulator()) {
                         val probe = probeSignal(PROBE_FRAMES)
+                        VoiceLog.i(
+                            "Mic",
+                            "Emulator probe ${sourceName(source)} max_rms=${"%.4f".format(probe.maxRms)}",
+                        )
+                        if (probe.maxRms > fallbackMaxRms) {
+                            fallbackMaxRms = probe.maxRms
+                            fallbackSource = source
+                        }
                         if (probe.maxRms < SILENT_SOURCE_MAX_RMS) {
                             VoiceLog.w(
                                 "Mic",
-                                "Silent emulator input on ${sourceName(source)} " +
-                                    "(max_rms=${"%.4f".format(probe.maxRms)}) — trying next source",
+                                "Low energy on ${sourceName(source)} — ranking fallbacks",
                             )
-                            lastError = "Silent microphone input on ${sourceName(source)}"
+                            // Keep record released; try next source. We'll reopen the
+                            // best fallback if every source is quiet.
                             releaseRecord()
                             continue
                         }
@@ -105,17 +133,36 @@ class PcmAudioCapture(
                     return@Thread
                 }
 
+                // Quiet room / host mic not yet hot: still use the best-initialized source.
+                val quietSource = fallbackSource
+                if (VoiceDeviceHints.isLikelyEmulator() && quietSource != null && isCapturing) {
+                    releaseRecord()
+                    val reopenError = openCapture(quietSource)
+                    if (reopenError == null) {
+                        VoiceLog.w(
+                            "Mic",
+                            "Using quiet emulator source ${sourceName(quietSource)} " +
+                                "(max_rms=${"%.4f".format(fallbackMaxRms)}) — enable host mic if needed",
+                        )
+                        if (fallbackMaxRms < SILENT_SOURCE_MAX_RMS) {
+                            onInputSilent?.invoke()
+                        }
+                        try {
+                            captureLoop(onChunk)
+                        } catch (e: Exception) {
+                            VoiceLog.e("Mic", "Capture loop failed", e)
+                            onFailure(e.message ?: "Microphone capture failed")
+                        }
+                        return@Thread
+                    }
+                    lastError = reopenError
+                }
+
                 isCapturing = false
                 _audioLevel.value = 0f
                 val message = lastError ?: "No microphone capture source available"
                 VoiceLog.e("Mic", message)
-                onFailure(
-                    if (VoiceDeviceHints.isLikelyEmulator()) {
-                        "$message. Check Extended Controls → Microphone → host audio input."
-                    } else {
-                        message
-                    },
-                )
+                onFailure(emulatorMicFailureMessage(message))
             },
             "voice-mic-capture",
         ).also { it.start() }
@@ -137,7 +184,10 @@ class PcmAudioCapture(
             return "Microphone does not support ${SAMPLE_RATE_HZ}Hz PCM16 capture"
         }
 
-        val bufferSize = minBuffer.coerceAtLeast(FRAME_SIZE_BYTES * 4)
+        // Larger ring on emulators: host virtual-mic scheduling is bursty; overflow
+        // when the capture loop pauses is a common cause of silent/stale frames.
+        val frameMultiplier = if (VoiceDeviceHints.isLikelyEmulator()) 8 else 4
+        val bufferSize = minBuffer.coerceAtLeast(FRAME_SIZE_BYTES * frameMultiplier)
         val record = AudioRecord(
             source,
             SAMPLE_RATE_HZ,
@@ -159,7 +209,12 @@ class PcmAudioCapture(
 
         audioRecord = record
         activeSource = source
-        audioEffects = attachAndEnableAudioEffects(record.audioSessionId)
+        audioEffects = if (VoiceDeviceHints.shouldAttachPlatformEffects()) {
+            attachAndEnableAudioEffects(record.audioSessionId)
+        } else {
+            VoiceLog.i("Mic", "Skipping platform AEC/NS/AGC on emulator")
+            emptyList()
+        }
         VoiceLog.i(
             "Mic",
             "AudioRecord started (source=${sourceName(source)}, buffer=$bufferSize, " +
@@ -191,10 +246,14 @@ class PcmAudioCapture(
         var chunksSent = 0
 
         while (isCapturing) {
-            while (isCapturing && isMuted) {
-                Thread.sleep(MUTE_POLL_MS)
+            if (isMuted) {
+                // Cheap mute: non-blocking discard + sleep. Avoid stop/start thrashing
+                // (expensive on AVDs every E2E user turn) and avoid busy spin-drain.
+                _audioLevel.value = 0f
+                drainPendingFrames(record, frameBuffer)
+                Thread.sleep(MUTE_YIELD_MS)
+                continue
             }
-            if (!isCapturing) break
 
             val bytesRead = record.read(frameBuffer, 0, FRAME_SIZE_BYTES)
             when {
@@ -206,6 +265,7 @@ class PcmAudioCapture(
                     }
                     val rawRms = rawRmsFromPcm16(chunk)
                     _audioLevel.value = (rawRms * LEVEL_UI_GAIN).coerceIn(0f, 1f)
+                    trackEmulatorSilence(rawRms)
                     onChunk(Base64.encodeToString(chunk, Base64.NO_WRAP))
                     chunksSent++
                     if (chunksSent == 1 || chunksSent % MIC_LEVEL_LOG_INTERVAL == 0) {
@@ -225,15 +285,44 @@ class PcmAudioCapture(
         }
     }
 
+    private fun drainPendingFrames(record: AudioRecord, frameBuffer: ByteArray) {
+        // Drop whatever is already buffered so unmute does not flush stale PCM upstream.
+        var reads = 0
+        while (reads < MUTE_DRAIN_MAX_READS) {
+            val n = record.read(
+                frameBuffer,
+                0,
+                FRAME_SIZE_BYTES,
+                AudioRecord.READ_NON_BLOCKING,
+            )
+            if (n <= 0) break
+            reads++
+        }
+    }
+
     fun isCapturing(): Boolean = isCapturing
 
     fun stop() {
         isCapturing = false
         isMuted = false
+        silentFrameCount = 0
         recordingThread?.join(500)
         recordingThread = null
         releaseRecord()
         _audioLevel.value = 0f
+    }
+
+    private fun trackEmulatorSilence(rawRms: Float) {
+        if (!VoiceDeviceHints.isLikelyEmulator() || isMuted) return
+        if (rawRms >= SIGNAL_FRAME_RMS) {
+            silentFrameCount = 0
+            return
+        }
+        silentFrameCount++
+        if (silentFrameCount == SUSTAINED_SILENCE_FRAME_THRESHOLD) {
+            onInputSilent?.invoke()
+            silentFrameCount = 0
+        }
     }
 
     private fun releaseRecord() {
@@ -308,7 +397,6 @@ class PcmAudioCapture(
     private fun sourceName(source: Int): String = when (source) {
         MediaRecorder.AudioSource.MIC -> "MIC"
         MediaRecorder.AudioSource.VOICE_COMMUNICATION -> "VOICE_COMMUNICATION"
-        MediaRecorder.AudioSource.VOICE_RECOGNITION -> "VOICE_RECOGNITION"
         MediaRecorder.AudioSource.DEFAULT -> "DEFAULT"
         else -> source.toString()
     }
@@ -321,8 +409,16 @@ class PcmAudioCapture(
             (SAMPLE_RATE_HZ * FRAME_DURATION_MS / 1000 * BYTES_PER_SAMPLE).toInt()
         private const val MIC_LEVEL_LOG_INTERVAL = 50
         private const val LEVEL_UI_GAIN = 10f
-        private const val MUTE_POLL_MS = 20L
-        private const val PROBE_FRAMES = 8
-        private const val SILENT_SOURCE_MAX_RMS = 0.0001f
+        /** Yield while muted so the capture thread does not spin. */
+        private const val MUTE_YIELD_MS = 40L
+        private const val MUTE_DRAIN_MAX_READS = 8
+        private const val PROBE_FRAMES = 15
+        private const val SILENT_SOURCE_MAX_RMS = 0.0005f
+        private const val SIGNAL_FRAME_RMS = 0.002f
+        private const val SUSTAINED_SILENCE_FRAME_THRESHOLD = 150
+
+        fun emulatorMicFailureMessage(base: String): String =
+            "$base. On the AVD: Extended Controls → Microphone → enable host audio input, " +
+                "or run: adb emu avd hostmicon"
     }
 }

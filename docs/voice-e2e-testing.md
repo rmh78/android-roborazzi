@@ -8,16 +8,30 @@ The **integration/agent-behavior layer** — validates live voice session behavi
 - Tool execution (`navigate_to_screen`, `open_list_item`, `describe_screen`, `web_search`)
 - Conversation turn order (You → Grok pairs)
 - Navigation driven by voice commands
-- Audio/session timing and emulator half-duplex behavior
+- Session timing after assistant playback
 
 Do **not** use E2E for pixel-level UI regression — that belongs in [screenshot-testing.md](screenshot-testing.md).
+Do **not** use E2E to validate live microphone DSP — use manual device tests for that.
+
+## Why inject-only (stable / low CPU)
+
+AVD user-audio simulation (TTS, continuous `AudioRecord`, mute thrash) spikes CPU and is flaky.
+The harness therefore runs in **inject-only** mode by default:
+
+| Concern | Strategy |
+|---------|----------|
+| User turns | `VOICE_SPOKEN` text inject (no TTS, no beep) |
+| Microphone | **Not opened** during the test (`skipLiveCapture`) |
+| Assistant audio | Real PCM playback from the API (still validated) |
+| Ready-to-speak | Status `Listening — ask a question` after greeting/response drain |
+
+This exercises tools, navigation, transcripts, and turn order without host-mic or speech-synthesis load.
 
 ## Why emulator + instrumented
 
 | Requirement | Why JVM/Roborazzi is insufficient |
 |-------------|-----------------------------------|
 | WebSocket to xAI | Needs real network stack |
-| `RECORD_AUDIO` permission | Needs Android runtime |
 | Tool dispatch through live session | Needs `GrokVoiceSession` + ViewModel lifecycle |
 | UiAutomator semantics | Needs rendered activity on device |
 | Turn-order validation | Needs real API responses |
@@ -27,7 +41,8 @@ Do **not** use E2E for pixel-level UI regression — that belongs in [screenshot
 Single integration test: [`VoiceAppIntegrationTest.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/VoiceAppIntegrationTest.kt)
 
 - Runs via `ActivityScenarioRule(MainActivity::class.java)`
-- Grants `RECORD_AUDIO` and `MODIFY_AUDIO_SETTINGS`
+- Grants `RECORD_AUDIO` and `MODIFY_AUDIO_SETTINGS` (permissions still required by the app)
+- Enables E2E inject-only via `VOICE_E2E_MODE` before connect
 - Fails fast if `BuildConfig.XAI_API_KEY == "no-api-key"`
 - Typical runtime: 2–5 minutes
 
@@ -54,10 +69,10 @@ Single integration test: [`VoiceAppIntegrationTest.kt`](../app/src/androidTest/j
 | Method | Purpose |
 |--------|---------|
 | `connect()` / `disconnect()` | Toggle voice connect switch |
-| `waitForVoiceReady()` | Session connected + listening phase |
-| `waitForReadyToSpeak()` | `Listening — ask a question` status |
-| `speakAndWaitForTool(text, toolName)` | Inject speech, wait for tool invocation |
-| `speakAndWaitForResponse(text)` | Inject speech, wait for Grok reply |
+| `waitForVoiceReady()` | Session connected + post-Hello **Listening** |
+| `waitForReadyToSpeak()` | Strict `Listening` status only |
+| `speakAndWaitForTool(text, toolName)` | Inject turn, wait for tool + follow-up |
+| `speakAndWaitForResponse(text)` | Inject turn, wait for Grok reply |
 | `waitForItemsListScreen()` | `item-list-screen` semantics or "Items" text |
 | `waitForListItemSelected(index)` | `item-row-selected-N` semantics |
 | `assertExchangeTurns()` | You → Grok pair completed |
@@ -66,86 +81,39 @@ Single integration test: [`VoiceAppIntegrationTest.kt`](../app/src/androidTest/j
 
 Logging uses tag `VoiceE2E` via [`VoiceE2ELog.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/support/VoiceE2ELog.kt). CI streams this via logcat in [`scripts/run-voice-integration-test.sh`](../scripts/run-voice-integration-test.sh).
 
-## Speech simulation (TTS + inject)
+## User turns (inject only)
 
-E2E does not rely on host microphone input. [`TestSpeechAnnouncer.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/support/TestSpeechAnnouncer.kt) uses:
+[`TestSpeechAnnouncer.kt`](../app/src/androidTest/java/com/example/roborazzidemo/voice/support/TestSpeechAnnouncer.kt):
 
-1. Optional emulator TTS playback (audible on AVD)
-2. `VOICE_SPOKEN` debug broadcast to inject the user turn into the live session
+1. Enables `VOICE_E2E_MODE` (`inject_only` + `skip_live_capture`) before the session starts
+2. On each step: `VOICE_SPOKEN` inject only (retried while the user-turn gate is closed)
 
-This avoids host-mic flakiness in CI. Disable TTS playback with:
+Optional audible cues (not recommended for CI):
 
 ```bash
--Pandroid.testInstrumentationRunnerArguments.disableTestSpeechPlayback=true
+# Short system beep per user turn
+-Pandroid.testInstrumentationRunnerArguments.testSpeechMode=beep
+
+# Full TextToSpeech of the prompt (high AVD CPU — demo only)
+-Pandroid.testInstrumentationRunnerArguments.testSpeechMode=tts
 ```
 
-## Semantics contract
+## Semantics contract (do not break casually)
 
-UiAutomator relies on `contentDescription` strings set in Compose. **Changing these breaks the robot.**
-
-### Voice overlay ([`VoiceTranscriptOverlay.kt`](../app/src/main/java/com/example/roborazzidemo/ui/VoiceTranscriptOverlay.kt))
-
-| Semantics ID | Pattern | Used for |
-|--------------|---------|----------|
-| Overlay root | `voice-assistant-overlay` | Chrome visibility |
-| Connect switch | `voice-connect-switch` | Connect/disconnect |
+| Element | `contentDescription` | Used for |
+|---------|---------------------|----------|
 | Status line | `voice-status-{status text}` | Ready-to-speak sync (`Listening — ask a question`) |
-| Turn phase | `voice-turn-phase-{assistant\|user\|listening}` | Turn state |
-| Mic level | `voice-mic-level` | Connected chrome check |
-| Last tool | `voice-last-tool-{toolName}` | Tool assertion |
-| Transcript | `voice-transcript-summary-{summary}` | Turn order validation |
-| Transcript turns | `voice-transcript-turn-{index}-{you\|grok}` | Individual turns |
+| Transcript summary | `voice-transcript-summary-you,grok,...` | Turn order |
+| Last tool | `voice-last-tool-{name}` | Tool assertions |
+| Connect switch | `voice-connect-switch` | Connect/disconnect |
+| Overlay | `voice-assistant-overlay` | Shell visibility |
+| List screen | `item-list-screen` | Navigation |
+| Selected row | `item-row-selected-N` | `open_list_item` |
 
-### Screen semantics
-
-| Semantics ID | Set in | Used for |
-|--------------|--------|----------|
-| `item-list-screen` | `ItemListScreen.kt` | List screen detection |
-| `item-row-{N}` | `ItemListScreen.kt` | List row (not highlighted) |
-| `item-row-selected-{N}` | `ItemListScreen.kt` | Highlighted row after `open_list_item` |
-| `voice-sig-level-{label}` | `FuturisticComponents.kt` | Mic level UI fallback |
-
-Screen content is also detected by visible text: `"Roborazzi Demo"` (home), `"Items"` (list), `"Item not found"` (not-found), item titles (detail).
-
-## Turn-order validation
-
-The robot validates conversation integrity:
-
-- Optional Grok greeting as first turn (if present)
-- Subsequent turns alternate You → Grok
-- `hasEchoTurnAfterGrok` detects echo loops (stale user turns after Grok on emulator)
-- Status line (`voice-status-*`) is authoritative over turn-indicator nodes
-
-## Local run
+## Run locally
 
 ```bash
 export XAI_API_KEY=your-key-here
 adb shell am force-stop com.example.roborazzidemo
-
-./gradlew :app:connectedDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=com.example.roborazzidemo.voice.VoiceAppIntegrationTest
+bash scripts/run-voice-integration-test.sh
 ```
-
-The API key must be set **before building** — it is compiled into `BuildConfig.XAI_API_KEY`.
-
-## CI
-
-[`.github/workflows/voice-integration-test.yml`](../.github/workflows/voice-integration-test.yml):
-
-- Trigger: PRs only
-- Requires `XAI_API_KEY` repository secret (fails fast if missing)
-- Runner: `ubuntu-latest` with KVM
-- Emulator: API 34, Pixel 6, x86_64
-- Flow: cache warmup → emulator boot → `scripts/run-voice-integration-test.sh`
-- On failure: uploads `voice-integration-test-results` artifact
-
-## Checklist: extend E2E coverage
-
-1. Add a new step in `VoiceAppIntegrationTest` with `VoiceE2ELog.step(...)`.
-2. Use `speakAndWaitForTool` or `speakAndWaitForResponse` with natural language prompts.
-3. Add robot wait helpers if a new screen needs detection (semantics or text).
-4. Call `assertExchangeTurns()` after each exchange.
-5. If adding a new tool: ensure semantics for `voice-last-tool-{name}` are set in `VoiceTranscriptOverlay`.
-6. Update minimum turn counts in `assertConversationTurnCounts` if adding turns.
-7. Run locally on emulator with live API key before pushing.
-8. Verify CI secret is configured for PR runs.

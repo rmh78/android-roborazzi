@@ -18,6 +18,7 @@ import com.example.roborazzidemo.viewmodel.VoiceUiState
 fun VoiceOverlayChrome(
     state: VoiceUiState,
     onConnectChange: (Boolean) -> Unit = {},
+    onVoiceSelected: (String) -> Unit = {},
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -39,6 +40,7 @@ fun VoiceOverlayChrome(
         VoiceTranscriptOverlay(
             state = state,
             onConnectChange = onConnectChange,
+            onVoiceSelected = onVoiceSelected,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }

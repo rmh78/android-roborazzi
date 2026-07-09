@@ -70,6 +70,7 @@ fun VoiceAssistantRoot(
                         viewModel.disconnect()
                     }
                 },
+                onVoiceSelected = viewModel::selectVoice,
             )
         }
     }
