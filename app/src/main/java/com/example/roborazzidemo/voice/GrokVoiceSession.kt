@@ -90,6 +90,8 @@ class GrokVoiceSession(
             VoiceLog.w("Session", "connect() ignored — already connected")
             return
         }
+        // Manual use must never inherit a sticky E2E inject-only flag from a prior test.
+        VoiceDebugBridge.ensureManualMicUnlessInstrumented()
         sessionConfigured = false
         sessionUpdateSent = false
         activeResponseId = null
@@ -103,7 +105,12 @@ class GrokVoiceSession(
         lastUserTranscriptItemId = null
         audioRoute.enterVoiceChat()
 
-        VoiceLog.i("Session", "Connecting to ${VoiceConstants.REALTIME_URL}")
+        VoiceLog.i(
+            "Session",
+            "Connecting to ${VoiceConstants.REALTIME_URL} " +
+                "(skipLiveCapture=${VoiceDebugBridge.skipLiveCapture}, " +
+                "instrumented=${VoiceDebugBridge.isUnderInstrumentation()})",
+        )
 
         val request = Request.Builder()
             .url(VoiceConstants.REALTIME_URL)
@@ -162,8 +169,11 @@ class GrokVoiceSession(
         toolFollowupResponseId = null
         lastUserTranscriptItemId = null
         audioRoute.exitVoiceChat()
-        // Keep skipLiveCapture across reconnects within one instrumented run;
-        // only clear when the process tears down. Tests re-enable via broadcast.
+        // Drop E2E inject-only after the session ends so a subsequent manual Connect
+        // always opens the real mic (instrumented tests re-enable before each run).
+        if (!VoiceDebugBridge.isUnderInstrumentation()) {
+            VoiceDebugBridge.clearE2eMode()
+        }
         VoiceLog.d("Session", "Connection cleaned up (audio_chunks_sent=$audioChunksSent)")
         publishVoiceSync()
         if (notifyListener) {

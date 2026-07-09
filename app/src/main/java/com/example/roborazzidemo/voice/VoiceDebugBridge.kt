@@ -3,8 +3,8 @@ package com.example.roborazzidemo.voice
 /**
  * Debug-only hook so emulator/CI E2E can drive the voice session with text injects.
  *
- * [skipLiveCapture] is the stable E2E path: no AudioRecord, no user TTS/beep, no mute thrash —
- * only WebSocket + assistant playback + [dispatchSpoken] injects.
+ * [skipLiveCapture] is only honored under instrumentation. Manual app use always
+ * opens the real microphone — E2E mode cannot stick after a test process handoff.
  */
 object VoiceDebugBridge {
     @Volatile
@@ -26,22 +26,39 @@ object VoiceDebugBridge {
     @Volatile
     var endTestUserSpeech: (() -> Unit)? = null
 
-    /**
-     * When true, [GrokVoiceSession] never opens the mic. E2E drives turns only via injects.
-     * Set before connect; cleared on disconnect.
-     */
     @Volatile
-    var skipLiveCapture: Boolean = false
-        private set
+    private var skipLiveCaptureRequested: Boolean = false
+
+    /**
+     * True only during instrumented E2E when inject-only was requested.
+     * Always false for normal manual launches (even if a prior test left state).
+     */
+    val skipLiveCapture: Boolean
+        get() = skipLiveCaptureRequested && isUnderInstrumentation()
 
     fun enableE2eInjectOnlyMode() {
-        skipLiveCapture = true
+        if (!isUnderInstrumentation()) {
+            VoiceLog.w("Debug", "Ignoring E2E inject-only outside instrumentation")
+            skipLiveCaptureRequested = false
+            return
+        }
+        skipLiveCaptureRequested = true
         VoiceLog.i("Debug", "E2E inject-only mode ON (no live mic / no user-audio cue)")
     }
 
     fun clearE2eMode() {
-        skipLiveCapture = false
-        VoiceLog.d("Debug", "E2E inject-only mode cleared")
+        if (skipLiveCaptureRequested) {
+            VoiceLog.d("Debug", "E2E inject-only mode cleared")
+        }
+        skipLiveCaptureRequested = false
+    }
+
+    /** Call at the start of every manual/session connect path. */
+    fun ensureManualMicUnlessInstrumented() {
+        if (!isUnderInstrumentation() && skipLiveCaptureRequested) {
+            VoiceLog.w("Debug", "Clearing sticky E2E inject-only flag for manual session")
+            skipLiveCaptureRequested = false
+        }
     }
 
     fun dispatch(text: String): Boolean {
@@ -81,4 +98,18 @@ object VoiceDebugBridge {
         handler()
         return true
     }
+
+    /**
+     * True when this process is running under an Android instrumentation runner
+     * (connectedAndroidTest). Normal app launches always return false.
+     */
+    fun isUnderInstrumentation(): Boolean =
+        try {
+            val activityThreadClass = Class.forName("android.app.ActivityThread")
+            val current = activityThreadClass.getMethod("currentActivityThread").invoke(null)
+            val instrumentation = activityThreadClass.getMethod("getInstrumentation").invoke(current)
+            instrumentation != null
+        } catch (_: Throwable) {
+            false
+        }
 }
