@@ -79,9 +79,30 @@ class PcmAudioPlayback {
         !isPlaying && playbackQueue.isEmpty() && !drainingPlayback
     }
 
-    fun whenIdle(onIdle: () -> Unit, postDrainDelayMs: Long = 0L) {
+    /**
+     * Invokes [onIdle] after queued PCM has been written and the AudioTrack has drained.
+     *
+     * @param postDrainDelayMs extra silence after hardware drain (emulator echo tail)
+     * @param graceForStartMs wait this long for late audio deltas after response.done
+     * before treating "empty queue" as idle (avoids killing Hello mid-arrival)
+     */
+    fun whenIdle(
+        onIdle: () -> Unit,
+        postDrainDelayMs: Long = 0L,
+        graceForStartMs: Long = PLAYBACK_START_GRACE_MS,
+    ) {
         Thread(
             {
+                // response.done can race the last audio deltas; wait briefly for work.
+                val graceDeadline = System.currentTimeMillis() + graceForStartMs
+                while (System.currentTimeMillis() < graceDeadline) {
+                    val hasWork = synchronized(lock) {
+                        isPlaying || playbackQueue.isNotEmpty() || totalFramesWritten > 0
+                    }
+                    if (hasWork) break
+                    Thread.sleep(PLAYBACK_IDLE_POLL_MS)
+                }
+
                 while (true) {
                     synchronized(lock) {
                         if (!isPlaying && playbackQueue.isEmpty()) {
@@ -93,10 +114,8 @@ class PcmAudioPlayback {
                 drainingPlayback = true
                 notifyIdleChanged()
                 waitForPlaybackDrain(postDrainDelayMs)
-                synchronized(lock) {
-                    releaseTrackLocked()
-                    totalFramesWritten = 0
-                }
+                // Do not release the track immediately after drain — keep it warm for the
+                // next assistant turn. Only stop() releases on disconnect.
                 drainingPlayback = false
                 VoiceLog.d("Playback", "Playback idle — ready for microphone capture")
                 notifyIdleChanged()
@@ -188,6 +207,8 @@ class PcmAudioPlayback {
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
+        // 4× min buffer reduces underruns on emulator host-audio scheduling.
+        val bufferSize = (minBuffer * 4).coerceAtLeast(minBuffer)
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -202,14 +223,21 @@ class PcmAudioPlayback {
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build(),
             )
-            .setBufferSizeInBytes(minBuffer)
+            .setBufferSizeInBytes(bufferSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
             .also { track ->
+                // Ensure stream is audible (some AVDs start media tracks at 0 gain).
+                try {
+                    track.setVolume(1.0f)
+                } catch (e: IllegalStateException) {
+                    VoiceLog.w("Playback", "AudioTrack.setVolume skipped: ${e.message}")
+                }
                 track.play()
                 VoiceLog.i(
                     "Playback",
-                    "AudioTrack created (${VoiceConstants.SAMPLE_RATE_HZ}Hz mono PCM16, media usage)",
+                    "AudioTrack created (${VoiceConstants.SAMPLE_RATE_HZ}Hz mono PCM16, " +
+                        "buffer=$bufferSize, media usage, volume=1.0)",
                 )
             }
     }
@@ -238,5 +266,7 @@ class PcmAudioPlayback {
         private const val PLAYBACK_HEAD_POLL_MS = 20L
         private const val PLAYBACK_DRAIN_MARGIN_MS = 1_500L
         private const val PLAYBACK_HEAD_SLACK_FRAMES = 2_400L
+        /** Allow late response.output_audio.delta after response.done before idling. */
+        private const val PLAYBACK_START_GRACE_MS = 400L
     }
 }

@@ -132,9 +132,16 @@ Session config uses `grok-voice-latest`, voice `eve`, server VAD, and an **Answe
 
 ### Emulator vs physical device
 
-Voice behaves very differently on an AVD than on a real phone. Emulators use **half-duplex** (mic muted while Grok speaks; no barge-in) to avoid echo loops. Physical devices use **full-duplex** with hardware AEC and barge-in for natural conversation.
+Voice behaves very differently on an AVD than on a real phone. Emulators use **half-duplex** (mic muted while Grok speaks; no barge-in) to avoid echo loops. Physical devices follow the [xAI Android demo](https://github.com/xai-org/xai-cookbook/tree/main/Android/VoiceApiAndroidExample): **full-duplex** with hardware AEC and barge-in.
 
 Expect turn-taking on emulators: wait for **Listening — ask a question** before you speak. Use headphones when testing on an AVD.
+
+```bash
+# Boot a voice-friendly API 34 AVD and enable host mic input
+./scripts/start-voice-emulator.sh
+# Or on an already-running emulator:
+./scripts/enable-emulator-mic.sh
+```
 
 See [docs/voice-assistant.md](docs/voice-assistant.md) for the echo-loop diagram, audio routing details, debug broadcasts, and tool execution paths.
 

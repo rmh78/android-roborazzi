@@ -420,11 +420,16 @@ class GrokVoiceSession(
                 when {
                     !sessionConfigured -> {
                         sessionConfigured = true
-                        VoiceLog.i("Session", "Session configured — sending initial greeting")
+                        VoiceLog.i(
+                            "Session",
+                            "Session configured — greeting first (mic starts after Hello playback)",
+                        )
                         listener.onSessionReady()
                         listener.onStatusChanged("Grok is greeting you…")
+                        // Do not open AudioRecord yet: concurrent capture often silences
+                        // AudioTrack on emulators, and half-duplex mute left the mic stuck
+                        // after greeting when capture had already started muted.
                         sendInitialGreeting(socket)
-                        startAudioCapture()
                     }
                     pendingText != null -> {
                         pendingDebugText = null
@@ -495,6 +500,12 @@ class GrokVoiceSession(
                         "Tool follow-up response started (id=$toolFollowupResponseId)",
                     )
                 }
+                // Emulator half-duplex: stop uplink so Grok's speech cannot re-enter VAD.
+                // Devices stay full-duplex (xAI demo + hardware AEC).
+                if (VoiceDeviceHints.muteMicWhileAssistantSpeaks() && audioCapture.isCapturing()) {
+                    audioCapture.setMuted(true)
+                    VoiceLog.d("Session", "Emulator half-duplex — mic muted for assistant response")
+                }
                 VoiceLog.i("Session", "Response started (id=$activeResponseId)")
                 listener.onStatusChanged("Grok is responding…")
                 publishVoiceSync()
@@ -551,13 +562,10 @@ class GrokVoiceSession(
                 if (sessionConfigured) {
                     if (awaitingGreetingCompletion) {
                         awaitingGreetingCompletion = false
-                        if (audioCapture.isCapturing()) {
-                            listener.onStatusChanged("Listening — ask a question")
-                            publishVoiceSync()
-                        } else {
-                            listener.onStatusChanged("Preparing microphone…")
-                            startAudioCaptureAfterPlaybackIdle()
-                        }
+                        // Always wait for Hello PCM to finish before opening the mic so
+                        // (1) the user can hear the greeting and (2) capture starts unmuted.
+                        listener.onStatusChanged("Preparing microphone…")
+                        startAudioCaptureAfterPlaybackIdle()
                     } else if (
                         deferMicResumeForClientTool &&
                         toolFollowupResponsePending &&
@@ -598,7 +606,8 @@ class GrokVoiceSession(
     }
 
     private fun shouldIgnoreSpeechVad(): Boolean =
-        micGate.state != MicCaptureGate.State.Streaming
+        micGate.state != MicCaptureGate.State.Streaming ||
+            audioCapture.isMuted()
 
     private fun resumeMicAfterInject(socket: WebSocket, hadAudio: Boolean) {
         when {
@@ -615,20 +624,29 @@ class GrokVoiceSession(
     }
 
     private fun startAudioCaptureAfterPlaybackIdle() {
-        audioPlayback.whenIdle(onIdle = { startAudioCapture() })
+        audioPlayback.whenIdle(
+            onIdle = { startAudioCapture() },
+            postDrainDelayMs = VoiceDeviceHints.playbackTailMs(),
+        )
     }
 
     private fun startAudioCapture() {
         scope.launch(Dispatchers.IO) {
             try {
                 if (audioCapture.isCapturing()) {
-                    audioCapture.setMuted(false)
+                    applyMicMuteForCurrentPhase()
                     micGate.onCaptureStarted()
-                    listener.onStatusChanged("Listening — ask a question")
+                    if (!audioCapture.isMuted()) {
+                        listener.onStatusChanged("Listening — ask a question")
+                    }
                     publishVoiceSync()
-                    VoiceLog.i("Session", "Mic unmuted (capture already active)")
+                    VoiceLog.i(
+                        "Session",
+                        "Capture already active (muted=${audioCapture.isMuted()})",
+                    )
                     return@launch
                 }
+                val startMuted = shouldHoldMicMutedForHalfDuplex()
                 audioCapture.start(
                     onChunk = { base64Chunk ->
                         audioChunksSent++
@@ -645,16 +663,55 @@ class GrokVoiceSession(
                     onFailure = { message ->
                         listener.onError(message, recoverable = true)
                     },
+                    startMuted = startMuted,
                 )
                 micGate.onCaptureStarted()
-                listener.onStatusChanged("Listening — ask a question")
+                if (!audioCapture.isMuted()) {
+                    listener.onStatusChanged("Listening — ask a question")
+                }
                 publishVoiceSync()
-                VoiceLog.i("Session", "Mic streaming active (20ms PCM16 chunks)")
+                VoiceLog.i(
+                    "Session",
+                    "Mic streaming active (20ms PCM16 chunks, muted=${audioCapture.isMuted()}, " +
+                        "emulator_half_duplex=${VoiceDeviceHints.muteMicWhileAssistantSpeaks()})",
+                )
             } catch (e: Exception) {
                 VoiceLog.e("Session", "Audio capture failed", e)
                 listener.onError(e.message ?: "Microphone capture failed", recoverable = true)
             }
         }
+    }
+
+    /**
+     * Emulator: keep mic muted while greeting/assistant response is in flight.
+     * Device: leave unmuted for continuous duplex (xAI demo).
+     */
+    private fun applyMicMuteForCurrentPhase() {
+        if (!VoiceDeviceHints.muteMicWhileAssistantSpeaks()) {
+            if (micGate.state == MicCaptureGate.State.Streaming && !testUserSpeechPlayback) {
+                audioCapture.setMuted(false)
+            }
+            return
+        }
+        val holdMuted = shouldHoldMicMutedForHalfDuplex()
+        audioCapture.setMuted(holdMuted)
+        if (holdMuted) {
+            VoiceLog.d(
+                "Session",
+                "Emulator mic held muted " +
+                    "(greeting=$awaitingGreetingCompletion, response=$activeResponseId, " +
+                    "playback_idle=${audioPlayback.isIdle()}, gate=${micGate.state})",
+            )
+        }
+    }
+
+    private fun shouldHoldMicMutedForHalfDuplex(): Boolean {
+        if (!VoiceDeviceHints.muteMicWhileAssistantSpeaks()) return false
+        return testUserSpeechPlayback ||
+            awaitingGreetingCompletion ||
+            activeResponseId != null ||
+            !audioPlayback.isIdle() ||
+            micGate.state != MicCaptureGate.State.Streaming
     }
 
     private fun isBenignApiError(message: String): Boolean =
@@ -683,7 +740,10 @@ class GrokVoiceSession(
             )
         }
         if (hadAudio || !audioPlayback.isIdle()) {
-            audioPlayback.whenIdle(onIdle = { finalizeResponse() })
+            audioPlayback.whenIdle(
+                onIdle = { finalizeResponse() },
+                postDrainDelayMs = VoiceDeviceHints.playbackTailMs(),
+            )
             playbackFinalizeJob = scope.launch {
                 delay(PLAYBACK_FINALIZE_TIMEOUT_MS)
                 if (!finalized) {
