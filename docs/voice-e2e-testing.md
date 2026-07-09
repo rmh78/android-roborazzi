@@ -54,9 +54,9 @@ Single integration test: [`VoiceAppIntegrationTest.kt`](../app/src/androidTest/j
 | Method | Purpose |
 |--------|---------|
 | `connect()` / `disconnect()` | Toggle voice connect switch |
-| `waitForVoiceReady()` | Session connected + listening phase |
-| `waitForReadyToSpeak()` | `Listening — ask a question` status |
-| `speakAndWaitForTool(text, toolName)` | Inject speech, wait for tool invocation |
+| `waitForVoiceReady()` | Session connected + post-Hello **Listening** (not Preparing mic) |
+| `waitForReadyToSpeak()` | Strict `Listening` / `Listening — ask a question` only |
+| `speakAndWaitForTool(text, toolName)` | Inject speech (retried if gate closed), wait for tool + follow-up |
 | `speakAndWaitForResponse(text)` | Inject speech, wait for Grok reply |
 | `waitForItemsListScreen()` | `item-list-screen` semantics or "Items" text |
 | `waitForListItemSelected(index)` | `item-row-selected-N` semantics |

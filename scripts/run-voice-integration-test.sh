@@ -10,8 +10,10 @@ log() {
 
 start_logcat() {
   adb logcat -c >/dev/null 2>&1 || true
-  log "Streaming emulator logs (tag VoiceE2E, TestRunner) — test steps appear below"
-  adb logcat -v time VoiceE2E:I TestRunner:I AndroidJUnitRunner:I Instrumentation:I *:S &
+  log "Streaming emulator logs (VoiceE2E, VoiceAssistant, TestRunner) — steps appear below"
+  adb logcat -v time \
+    VoiceE2E:I VoiceAssistant:I VoiceAssistant:W VoiceAssistant:E \
+    TestRunner:I AndroidJUnitRunner:I Instrumentation:I *:S &
   LOGCAT_PID=$!
 }
 

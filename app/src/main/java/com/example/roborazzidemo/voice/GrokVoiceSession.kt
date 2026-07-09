@@ -183,19 +183,31 @@ class GrokVoiceSession(
 
     fun endTestUserSpeech() {
         testUserSpeechPlayback = false
-        if (audioCapture.isMuted()) {
+        // Restore half-duplex/device mute for the current phase (do not force-unmute
+        // if the assistant is still speaking on emulator).
+        applyMicMuteForCurrentPhase()
+        if (!VoiceDeviceHints.muteMicWhileAssistantSpeaks() &&
+            micGate.state == MicCaptureGate.State.Streaming
+        ) {
             audioCapture.setMuted(false)
         }
-        VoiceLog.d("Session", "Test user speech playback ended — mic gate re-evaluated")
+        VoiceLog.d(
+            "Session",
+            "Test user speech playback ended — muted=${audioCapture.isMuted()}",
+        )
         publishVoiceSync()
     }
 
-    fun sendSpokenUserMessage(text: String) {
+    /**
+     * @return true if the inject was accepted (gate open). E2E retries when false.
+     */
+    fun sendSpokenUserMessage(text: String): Boolean {
         if (!isUserTurnGateOpen()) {
             VoiceLog.w("Session", "sendSpokenUserMessage blocked — user turn gate closed")
-            return
+            return false
         }
         sendSpokenUserMessageNow(text)
+        return true
     }
 
     private fun sendSpokenUserMessageNow(text: String) {

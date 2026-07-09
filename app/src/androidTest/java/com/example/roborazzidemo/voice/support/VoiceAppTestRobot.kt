@@ -94,13 +94,14 @@ class VoiceAppTestRobot private constructor(
         VoiceE2ELog.detail("response complete: status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
     }
 
-    fun speakAndWaitForTool(text: String, toolName: String, timeoutMillis: Long = 60_000) {
+    fun speakAndWaitForTool(text: String, toolName: String, timeoutMillis: Long = 120_000) {
         waitForReadyToSpeak()
         VoiceE2ELog.step("speak (tool=$toolName): \"$text\"")
         val baseline = toolWaitBaseline()
         speak(text)
-        waitForUserTurnRegistered(baseline, timeoutMillis / 4)
+        waitForUserTurnRegistered(baseline, (timeoutMillis / 4).coerceAtLeast(30_000))
         waitForToolInvocation(toolName, baseline, timeoutMillis)
+        // Tool follow-up speech + emulator playback drain before the next inject.
         waitForListeningPhase(timeoutMillis)
         VoiceE2ELog.detail("tool complete: tool=$toolName status=[${status()}] turns=[${conversationTurnsIncludingLive().joinToString()}]")
     }
@@ -139,8 +140,10 @@ class VoiceAppTestRobot private constructor(
                     error("Voice session disconnected before ready. ${diagnostics()}")
                 "Waiting for conversation…",
                 "Configuring session…",
+                "Grok is greeting you…",
+                "Preparing microphone…",
                 -> false
-                else -> isReadyToListen(current)
+                else -> isListeningReady()
             }
         }
     }
@@ -412,12 +415,18 @@ class VoiceAppTestRobot private constructor(
     private fun isAssistantTurnActive(): Boolean =
         device.findObject(By.desc("voice-assistant-turn-active")) != null
 
-    /** Status line is authoritative — Compose phase nodes can lag or go stale in UiAutomator. */
+    /**
+     * Ready only when status is Listening *and* inject gate can open.
+     * "Preparing microphone…" is NOT ready — capture is still starting after Hello.
+     */
     private fun isListeningReady(): Boolean {
         val current = status()
-        return isReadyToListen(current) &&
-            !isAssistantSpeaking(current) &&
-            !isUserSpeaking(current)
+        if (!isReadyToListen(current)) return false
+        if (isAssistantSpeaking(current) || isUserSpeaking(current)) return false
+        // Prefer explicit Listening phase when present; ignore stale Assistant only when
+        // status already says Listening (phase nodes can lag on CI).
+        if (device.findObject(By.desc("voice-turn-phase-user")) != null) return false
+        return true
     }
 
     private fun isAssistantPhase(): Boolean =
@@ -429,6 +438,7 @@ class VoiceAppTestRobot private constructor(
     private fun isAssistantSpeaking(status: String): Boolean =
         status.contains("Grok is responding", ignoreCase = true) ||
             status.contains("Grok is greeting", ignoreCase = true) ||
+            status.contains("Preparing microphone", ignoreCase = true) ||
             status.contains("Running ", ignoreCase = true) ||
             status.contains("Running tool", ignoreCase = true) ||
             status.contains("Processing", ignoreCase = true)
@@ -443,7 +453,6 @@ class VoiceAppTestRobot private constructor(
             isUserSpeaking(status) || isAssistantSpeaking(status) -> false
             status.contains("Listening — ask a question", ignoreCase = true) -> true
             status.equals("Listening", ignoreCase = true) -> true
-            status.contains("Preparing microphone", ignoreCase = true) -> true
             else -> false
         }
 

@@ -8,8 +8,9 @@ object VoiceDebugBridge {
     @Volatile
     var sendTextCommand: ((String) -> Unit)? = null
 
+    /** Returns true when the session accepted the inject (user-turn gate open). */
     @Volatile
-    var sendSpokenUserCommand: ((String) -> Unit)? = null
+    var sendSpokenUserCommand: ((String) -> Boolean)? = null
 
     @Volatile
     var disconnectCommand: (() -> Unit)? = null
@@ -31,8 +32,7 @@ object VoiceDebugBridge {
 
     fun dispatchSpoken(text: String): Boolean {
         val handler = sendSpokenUserCommand ?: return false
-        handler(text)
-        return true
+        return handler(text)
     }
 
     fun disconnect(): Boolean {

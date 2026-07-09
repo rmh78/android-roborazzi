@@ -52,13 +52,19 @@ class VoiceDebugReceiver : BroadcastReceiver() {
         val text = intent.getStringExtra(EXTRA_TEXT)?.trim().orEmpty()
         if (text.isEmpty()) {
             VoiceLog.w("Debug", "VOICE_SPOKEN broadcast missing text extra")
+            resultCode = Activity.RESULT_CANCELED
             return
         }
         val accepted = VoiceDebugBridge.dispatchSpoken(text)
         if (accepted) {
             VoiceLog.i("Debug", "Injected spoken user message: $text")
+            resultCode = Activity.RESULT_OK
         } else {
-            VoiceLog.w("Debug", "Spoken user message dropped — voice session not connected")
+            VoiceLog.w(
+                "Debug",
+                "Spoken user message dropped — session missing or user-turn gate closed",
+            )
+            resultCode = Activity.RESULT_CANCELED
         }
     }
 
