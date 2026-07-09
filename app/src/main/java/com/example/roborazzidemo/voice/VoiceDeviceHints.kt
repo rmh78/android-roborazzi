@@ -25,15 +25,16 @@ object VoiceDeviceHints {
             android.os.Build.PRODUCT.contains("sdk_gphone", ignoreCase = true)
 
     /**
-     * xAI demo uses [MediaRecorder.AudioSource.VOICE_COMMUNICATION] only.
-     * On emulators, fall back through additional sources when the virtual mic is silent.
+     * xAI demo uses [MediaRecorder.AudioSource.VOICE_COMMUNICATION] only on devices.
+     * On emulators prefer [MediaRecorder.AudioSource.MIC] first — VOICE_COMMUNICATION
+     * often delivers a loud constant noise floor on AVDs that blocks useful VAD.
      */
     fun captureSources(): List<Int> =
         if (isLikelyEmulator()) {
             listOf(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 MediaRecorder.AudioSource.MIC,
                 MediaRecorder.AudioSource.DEFAULT,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
             )
         } else {
             listOf(MediaRecorder.AudioSource.VOICE_COMMUNICATION)

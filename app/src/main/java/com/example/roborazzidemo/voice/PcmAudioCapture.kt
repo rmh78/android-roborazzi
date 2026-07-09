@@ -81,11 +81,9 @@ class PcmAudioCapture(
             {
                 val sources = VoiceDeviceHints.captureSources()
                 var lastError: String? = null
-                // Prefer a source that shows energy, but never reject a working AudioRecord
-                // just because the room is quiet — silence at connect is normal.
-                var fallbackSource: Int? = null
-                var fallbackMaxRms = -1f
 
+                // Use the first source that initializes. Do NOT rank by loudest RMS —
+                // that preferred constant AVD noise floors (~0.7) over usable host mics.
                 for (source in sources) {
                     if (!isCapturing) return@Thread
                     releaseRecord()
@@ -103,19 +101,9 @@ class PcmAudioCapture(
                             "Mic",
                             "Emulator probe ${sourceName(source)} max_rms=${"%.4f".format(probe.maxRms)}",
                         )
-                        if (probe.maxRms > fallbackMaxRms) {
-                            fallbackMaxRms = probe.maxRms
-                            fallbackSource = source
-                        }
+                        // Hint only — never reject a working source for being quiet.
                         if (probe.maxRms < SILENT_SOURCE_MAX_RMS) {
-                            VoiceLog.w(
-                                "Mic",
-                                "Low energy on ${sourceName(source)} — ranking fallbacks",
-                            )
-                            // Keep record released; try next source. We'll reopen the
-                            // best fallback if every source is quiet.
-                            releaseRecord()
-                            continue
+                            onInputSilent?.invoke()
                         }
                     }
 
@@ -131,31 +119,6 @@ class PcmAudioCapture(
                         onFailure(e.message ?: "Microphone capture failed")
                     }
                     return@Thread
-                }
-
-                // Quiet room / host mic not yet hot: still use the best-initialized source.
-                val quietSource = fallbackSource
-                if (VoiceDeviceHints.isLikelyEmulator() && quietSource != null && isCapturing) {
-                    releaseRecord()
-                    val reopenError = openCapture(quietSource)
-                    if (reopenError == null) {
-                        VoiceLog.w(
-                            "Mic",
-                            "Using quiet emulator source ${sourceName(quietSource)} " +
-                                "(max_rms=${"%.4f".format(fallbackMaxRms)}) — enable host mic if needed",
-                        )
-                        if (fallbackMaxRms < SILENT_SOURCE_MAX_RMS) {
-                            onInputSilent?.invoke()
-                        }
-                        try {
-                            captureLoop(onChunk)
-                        } catch (e: Exception) {
-                            VoiceLog.e("Mic", "Capture loop failed", e)
-                            onFailure(e.message ?: "Microphone capture failed")
-                        }
-                        return@Thread
-                    }
-                    lastError = reopenError
                 }
 
                 isCapturing = false
@@ -408,7 +371,8 @@ class PcmAudioCapture(
         private const val FRAME_SIZE_BYTES =
             (SAMPLE_RATE_HZ * FRAME_DURATION_MS / 1000 * BYTES_PER_SAMPLE).toInt()
         private const val MIC_LEVEL_LOG_INTERVAL = 50
-        private const val LEVEL_UI_GAIN = 10f
+        /** Soft UI gain so ambient noise does not peg the SIG meter at 1.0. */
+        private const val LEVEL_UI_GAIN = 4f
         /** Yield while muted so the capture thread does not spin. */
         private const val MUTE_YIELD_MS = 40L
         private const val MUTE_DRAIN_MAX_READS = 8
