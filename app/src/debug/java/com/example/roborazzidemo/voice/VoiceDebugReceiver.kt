@@ -8,6 +8,7 @@ import android.content.Intent
 class VoiceDebugReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
+            ACTION_VOICE_E2E_MODE -> handleE2eMode(intent)
             ACTION_VOICE_TEST_WARMUP -> handleTestWarmup(context, intent)
             ACTION_VOICE_TEST_ANNOUNCE -> handleTestAnnounce(context, intent)
             ACTION_VOICE_TEXT -> handleVoiceText(intent)
@@ -16,6 +17,18 @@ class VoiceDebugReceiver : BroadcastReceiver() {
             ACTION_VOICE_TEST_SPEECH_END -> handleTestSpeechEnd()
             ACTION_VOICE_DISCONNECT -> handleDisconnect()
             else -> Unit
+        }
+    }
+
+    private fun handleE2eMode(intent: Intent) {
+        val injectOnly = intent.getBooleanExtra(EXTRA_INJECT_ONLY, true)
+        val skipCapture = intent.getBooleanExtra(EXTRA_SKIP_LIVE_CAPTURE, injectOnly)
+        if (injectOnly || skipCapture) {
+            VoiceDebugBridge.enableE2eInjectOnlyMode()
+            resultCode = Activity.RESULT_OK
+        } else {
+            VoiceDebugBridge.clearE2eMode()
+            resultCode = Activity.RESULT_OK
         }
     }
 
@@ -104,6 +117,7 @@ class VoiceDebugReceiver : BroadcastReceiver() {
     }
 
     companion object {
+        const val ACTION_VOICE_E2E_MODE = "com.example.roborazzidemo.VOICE_E2E_MODE"
         const val ACTION_VOICE_TEST_WARMUP = "com.example.roborazzidemo.VOICE_TEST_WARMUP"
         const val ACTION_VOICE_TEST_ANNOUNCE = "com.example.roborazzidemo.VOICE_TEST_ANNOUNCE"
         const val ACTION_VOICE_TEXT = "com.example.roborazzidemo.VOICE_TEXT"
@@ -112,7 +126,9 @@ class VoiceDebugReceiver : BroadcastReceiver() {
         const val ACTION_VOICE_TEST_SPEECH_END = "com.example.roborazzidemo.VOICE_TEST_SPEECH_END"
         const val ACTION_VOICE_DISCONNECT = "com.example.roborazzidemo.VOICE_DISCONNECT"
         const val EXTRA_TEXT = "text"
-        /** `beep` (default, low CPU) or `tts` (full prompt speech). */
+        /** `beep` or `tts` when using optional audible cues. */
         const val EXTRA_SPEECH_MODE = "speech_mode"
+        const val EXTRA_INJECT_ONLY = "inject_only"
+        const val EXTRA_SKIP_LIVE_CAPTURE = "skip_live_capture"
     }
 }

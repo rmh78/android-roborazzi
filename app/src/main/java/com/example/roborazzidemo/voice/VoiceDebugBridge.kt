@@ -1,8 +1,10 @@
 package com.example.roborazzidemo.voice
 
 /**
- * Debug-only hook so emulator/CI E2E can drive the voice session with text input
- * when the virtual microphone path is unreliable.
+ * Debug-only hook so emulator/CI E2E can drive the voice session with text injects.
+ *
+ * [skipLiveCapture] is the stable E2E path: no AudioRecord, no user TTS/beep, no mute thrash —
+ * only WebSocket + assistant playback + [dispatchSpoken] injects.
  */
 object VoiceDebugBridge {
     @Volatile
@@ -24,6 +26,24 @@ object VoiceDebugBridge {
     @Volatile
     var endTestUserSpeech: (() -> Unit)? = null
 
+    /**
+     * When true, [GrokVoiceSession] never opens the mic. E2E drives turns only via injects.
+     * Set before connect; cleared on disconnect.
+     */
+    @Volatile
+    var skipLiveCapture: Boolean = false
+        private set
+
+    fun enableE2eInjectOnlyMode() {
+        skipLiveCapture = true
+        VoiceLog.i("Debug", "E2E inject-only mode ON (no live mic / no user-audio cue)")
+    }
+
+    fun clearE2eMode() {
+        skipLiveCapture = false
+        VoiceLog.d("Debug", "E2E inject-only mode cleared")
+    }
+
     fun dispatch(text: String): Boolean {
         val handler = sendTextCommand ?: return false
         handler(text)
@@ -42,18 +62,21 @@ object VoiceDebugBridge {
     }
 
     fun pulseMicLevel(text: String): Boolean {
+        if (skipLiveCapture) return true
         val handler = pulseMicLevelForSpeech ?: return false
         handler(text)
         return true
     }
 
     fun beginTestSpeech(): Boolean {
+        if (skipLiveCapture) return true
         val handler = beginTestUserSpeech ?: return false
         handler()
         return true
     }
 
     fun endTestSpeech(): Boolean {
+        if (skipLiveCapture) return true
         val handler = endTestUserSpeech ?: return false
         handler()
         return true

@@ -276,8 +276,10 @@ class VoiceAppTestRobot private constructor(
     }
 
     fun assertConnectedVoiceChromeVisible() {
-        waitUntil(10_000, "Expected mic level UI while connected. ${diagnostics()}") {
-            micLevelUiVisible()
+        // Inject-only E2E still shows the overlay status chrome; SIG meter may stay flat
+        // with no live mic — require status/connect chrome, not mic level motion.
+        waitUntil(10_000, "Expected connected voice chrome. ${diagnostics()}") {
+            !isDisconnected() && status().isNotBlank()
         }
     }
 
@@ -572,6 +574,8 @@ class VoiceAppTestRobot private constructor(
             val device = UiDevice.getInstance(instrumentation)
             device.waitForIdle(5_000)
             val context = instrumentation.targetContext
+            // Before connect: skip live mic + user audio cues so AVD CPU stays stable.
+            TestSpeechAnnouncer.enableInjectOnlySession(context)
             TestSpeechAnnouncer.warmUp(context)
             val robot = VoiceAppTestRobot(device, context)
             if (!robot.pollForAppLaunched(60_000)) {

@@ -162,6 +162,8 @@ class GrokVoiceSession(
         toolFollowupResponseId = null
         lastUserTranscriptItemId = null
         audioRoute.exitVoiceChat()
+        // Keep skipLiveCapture across reconnects within one instrumented run;
+        // only clear when the process tears down. Tests re-enable via broadcast.
         VoiceLog.d("Session", "Connection cleaned up (audio_chunks_sent=$audioChunksSent)")
         publishVoiceSync()
         if (notifyListener) {
@@ -170,11 +172,13 @@ class GrokVoiceSession(
     }
 
     fun pulseMicLevelForSpeech(text: String) {
+        if (VoiceDebugBridge.skipLiveCapture) return
         syntheticMicLevel.pulseForSpeech(text)
     }
 
-    /** Mute live mic while emulator TTS plays so server VAD cannot commit speaker audio. */
+    /** Mute live mic while emulator cue audio plays so server VAD cannot commit speaker audio. */
     fun beginTestUserSpeech() {
+        if (VoiceDebugBridge.skipLiveCapture) return
         testUserSpeechPlayback = true
         audioCapture.setMuted(true)
         VoiceLog.d("Session", "Test user speech playback started — mic muted")
@@ -182,9 +186,8 @@ class GrokVoiceSession(
     }
 
     fun endTestUserSpeech() {
+        if (VoiceDebugBridge.skipLiveCapture) return
         testUserSpeechPlayback = false
-        // Restore half-duplex/device mute for the current phase (do not force-unmute
-        // if the assistant is still speaking on emulator).
         applyMicMuteForCurrentPhase()
         if (!VoiceDeviceHints.muteMicWhileAssistantSpeaks() &&
             micGate.state == MicCaptureGate.State.Streaming
@@ -220,15 +223,18 @@ class GrokVoiceSession(
             return
         }
         publishVoiceSync()
-        syntheticMicLevel.pulseForDuration(PROCESSING_MIC_PULSE_MS)
         clearResponseWatchdog()
-        audioCapture.setMuted(true)
         micGate.pauseForTextInject()
-        publishVoiceSync()
-        if (audioCapture.isCapturing()) {
-            VoiceLog.clientEvent("input_audio_buffer.clear (before spoken user inject)")
-            socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
+        // Inject-only E2E: no SIG animation, no mic mute thrash, no buffer clear.
+        if (!VoiceDebugBridge.skipLiveCapture) {
+            syntheticMicLevel.pulseForDuration(PROCESSING_MIC_PULSE_MS)
+            audioCapture.setMuted(true)
+            if (audioCapture.isCapturing()) {
+                VoiceLog.clientEvent("input_audio_buffer.clear (before spoken user inject)")
+                socket.send(JSONObject().put("type", "input_audio_buffer.clear").toString())
+            }
         }
+        publishVoiceSync()
         listener.onUserTranscriptInjected(text)
         sendUserTextTurn(socket, text, logLabel = "spoken user")
     }
@@ -243,6 +249,7 @@ class GrokVoiceSession(
             captureActive = audioCapture.isCapturing(),
             captureMuted = audioCapture.isMuted(),
             testUserSpeechPlayback = testUserSpeechPlayback,
+            skipLiveCapture = VoiceDebugBridge.skipLiveCapture,
         )
 
     private fun publishVoiceSync() {
@@ -645,6 +652,18 @@ class GrokVoiceSession(
     private fun startAudioCapture() {
         scope.launch(Dispatchers.IO) {
             try {
+                // Instrumented E2E: no AudioRecord — user turns are text injects only.
+                // This removes continuous PCM encode/Base64/WebSocket uplink CPU on AVDs.
+                if (VoiceDebugBridge.skipLiveCapture) {
+                    if (audioCapture.isCapturing()) {
+                        audioCapture.stop()
+                    }
+                    micGate.onCaptureStarted()
+                    listener.onStatusChanged("Listening — ask a question")
+                    publishVoiceSync()
+                    VoiceLog.i("Session", "E2E inject-only — live mic capture skipped")
+                    return@launch
+                }
                 if (audioCapture.isCapturing()) {
                     applyMicMuteForCurrentPhase()
                     micGate.onCaptureStarted()

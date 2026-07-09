@@ -6,6 +6,7 @@
             android:name=".voice.VoiceDebugReceiver"
             android:exported="true">
             <intent-filter>
+                <action android:name="com.example.roborazzidemo.VOICE_E2E_MODE" />
                 <action android:name="com.example.roborazzidemo.VOICE_TEST_WARMUP" />
                 <action android:name="com.example.roborazzidemo.VOICE_TEST_ANNOUNCE" />
                 <action android:name="com.example.roborazzidemo.VOICE_TEXT" />

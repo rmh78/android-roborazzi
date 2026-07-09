@@ -10,54 +10,71 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * Audible user-turn cue, then inject via [VoiceDebugReceiver.ACTION_VOICE_SPOKEN].
+ * E2E user turns: **text inject only** by default (no TTS, no beep, no live mic).
  *
- * Default cue is a short system **beep** (low CPU). Full TTS of the prompt is opt-in only
- * (`testSpeechMode=tts`) because emulator TextToSpeech spikes CPU and often sounds harsh.
- *
- * Order: mute mic → cue → unmute → inject (retry while gate closed).
+ * That keeps AVD CPU stable — the previous cue audio + AudioRecord path was the spike
+ * on every user step. Optional cues remain available via instrumentation args.
  */
 object TestSpeechAnnouncer {
-    private const val WARMUP_MS = 500L
-    private const val CUE_TIMEOUT_MS = 45_000L
     private const val INJECT_ATTEMPTS = 12
-    private const val INJECT_RETRY_MS = 500L
+    private const val INJECT_RETRY_MS = 400L
     private const val INJECT_RESULT_TIMEOUT_MS = 5_000L
+    private const val CUE_TIMEOUT_MS = 45_000L
 
-    private enum class Mode { None, Beep, Tts }
+    private enum class CueMode { None, Beep, Tts }
+
+    /**
+     * Enable inject-only session mode (skip AudioRecord) before connect.
+     * Safe to call multiple times.
+     */
+    fun enableInjectOnlySession(context: Context) {
+        val latch = CountDownLatch(1)
+        var ok = false
+        context.sendOrderedBroadcast(
+            Intent(VoiceDebugReceiver.ACTION_VOICE_E2E_MODE)
+                .setPackage(context.packageName)
+                .putExtra(VoiceDebugReceiver.EXTRA_INJECT_ONLY, true)
+                .putExtra(VoiceDebugReceiver.EXTRA_SKIP_LIVE_CAPTURE, true),
+            null,
+            object : BroadcastReceiver() {
+                override fun onReceive(ctx: Context?, intent: Intent?) {
+                    ok = resultCode == Activity.RESULT_OK
+                    latch.countDown()
+                }
+            },
+            null,
+            Activity.RESULT_CANCELED,
+            null,
+            null,
+        )
+        check(latch.await(3_000L, TimeUnit.MILLISECONDS)) {
+            "Timed out enabling E2E inject-only mode"
+        }
+        check(ok) { "Failed to enable E2E inject-only mode" }
+        VoiceE2ELog.step("E2E inject-only mode enabled (no live mic / no user audio cue)")
+    }
 
     fun warmUp(context: Context) {
-        when (speechMode()) {
-            Mode.None -> Unit
-            Mode.Beep -> {
-                // No TTS engine warm-up needed for ToneGenerator.
-                context.sendBroadcast(
-                    Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_WARMUP)
-                        .setPackage(context.packageName)
-                        .putExtra(VoiceDebugReceiver.EXTRA_SPEECH_MODE, "beep"),
-                )
-                Thread.sleep(WARMUP_MS)
-            }
-            Mode.Tts -> {
-                context.sendBroadcast(
-                    Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_WARMUP)
-                        .setPackage(context.packageName)
-                        .putExtra(VoiceDebugReceiver.EXTRA_SPEECH_MODE, "tts"),
-                )
-                Thread.sleep(2_000L)
-            }
+        // Inject-only: nothing to warm. Optional TTS still pre-inits when requested.
+        if (cueMode() == CueMode.Tts) {
+            context.sendBroadcast(
+                Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_WARMUP)
+                    .setPackage(context.packageName)
+                    .putExtra(VoiceDebugReceiver.EXTRA_SPEECH_MODE, "tts"),
+            )
+            Thread.sleep(2_000L)
         }
     }
 
     fun speak(context: Context, text: String) {
-        val mode = speechMode()
-        if (mode != Mode.None) {
+        val cue = cueMode()
+        if (cue != CueMode.None) {
             context.sendBroadcast(
                 Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_SPEECH_BEGIN)
                     .setPackage(context.packageName),
             )
             try {
-                playCue(context, text, mode)
+                playCue(context, text, cue)
             } finally {
                 context.sendBroadcast(
                     Intent(VoiceDebugReceiver.ACTION_VOICE_TEST_SPEECH_END)
@@ -112,22 +129,26 @@ object TestSpeechAnnouncer {
         return accepted
     }
 
-    private fun speechMode(): Mode {
+    /**
+     * Default: no audible user cue (inject only).
+     * Opt-in: `testSpeechMode=beep` or `tts`.
+     */
+    private fun cueMode(): CueMode {
         val args = InstrumentationRegistry.getArguments()
-        if (args.getString("disableTestSpeechPlayback") == "true") return Mode.None
+        if (args.getString("disableTestSpeechPlayback") == "true") return CueMode.None
         return when (args.getString("testSpeechMode")?.lowercase()) {
-            "none", "off", "inject" -> Mode.None
-            "tts", "speech" -> Mode.Tts
-            "beep", null, "" -> Mode.Beep
-            else -> Mode.Beep
+            "beep" -> CueMode.Beep
+            "tts", "speech" -> CueMode.Tts
+            "none", "off", "inject", null, "" -> CueMode.None
+            else -> CueMode.None
         }
     }
 
-    private fun playCue(context: Context, text: String, mode: Mode) {
+    private fun playCue(context: Context, text: String, mode: CueMode) {
         val modeExtra = when (mode) {
-            Mode.Tts -> "tts"
-            Mode.Beep -> "beep"
-            Mode.None -> return
+            CueMode.Tts -> "tts"
+            CueMode.Beep -> "beep"
+            CueMode.None -> return
         }
         val latch = CountDownLatch(1)
         var ok = false

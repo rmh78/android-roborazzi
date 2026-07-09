@@ -14,13 +14,16 @@ internal object VoiceTurnGate {
         captureActive: Boolean,
         captureMuted: Boolean,
         testUserSpeechPlayback: Boolean,
-    ): Boolean =
-        sessionConfigured &&
-            activeResponseId == null &&
-            !toolFollowupResponsePending &&
-            playbackIdle &&
-            !testUserSpeechPlayback &&
-            micGateState == MicCaptureGate.State.Streaming &&
-            captureActive &&
-            !captureMuted
+        /** E2E inject-only: no AudioRecord — gate ignores capture hardware state. */
+        skipLiveCapture: Boolean = false,
+    ): Boolean {
+        if (!sessionConfigured) return false
+        if (activeResponseId != null) return false
+        if (toolFollowupResponsePending) return false
+        if (!playbackIdle) return false
+        if (testUserSpeechPlayback) return false
+        if (micGateState != MicCaptureGate.State.Streaming) return false
+        if (skipLiveCapture) return true
+        return captureActive && !captureMuted
+    }
 }
